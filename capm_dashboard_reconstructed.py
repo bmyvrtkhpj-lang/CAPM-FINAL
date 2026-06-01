@@ -376,7 +376,7 @@ def return_frame_from_prices(fund_prices, benchmark_prices, frequency):
     prices = pd.concat([fund_prices.rename("fund"), benchmark_prices.rename("benchmark")], axis=1).dropna()
     prices = prices.sort_index()
     if frequency == "Monthly":
-        prices = prices.resample("M").last().dropna()
+        prices = prices.resample("ME").last().dropna()
     returns = prices.pct_change().dropna()
     returns.columns = ["fund_return", "benchmark_return"]
     return prices, returns
