@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 from mftool import Mftool
