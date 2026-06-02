@@ -1043,7 +1043,7 @@ def render_result_summary(r):
 
 
 def render_result_tabs(r):
-    overview, score_tab, performance, benchmark_tab, sip_tab, risk, capm, charts, rolling_tab, validation, data = st.tabs(
+    overview, score_tab, performance, benchmark_tab, sip_tab, risk, capm, charts, rolling_tab, bull_bear_tab, validation, data = st.tabs(
         ["Overview", "Score", "Performance", "Benchmark", "SIP Backtest", "Risk", "CAPM", "Charts", "Rolling Returns", "Validation", "Data"]
     )
     with overview:
@@ -1281,6 +1281,180 @@ def render_result_tabs(r):
             roll_table["Benchmark Rolling Return"] = roll_table["Benchmark Rolling Return"].apply(lambda x: pct(x))
             roll_table["Outperformance"] = roll_table["Outperformance"].apply(lambda x: pct(x))
             st.dataframe(roll_table.tail(24), use_container_width=True, hide_index=True)
+        with bull_bear_tab:
+        st.caption("Bull and Bear phases identified using Nifty 50 200-day SMA. Price above SMA = Bull, below = Bear.")
+        
+        # --- SMA Calculation on Benchmark ---
+        bench_daily = r["prices"]["benchmark"].copy()
+        sma_200 = bench_daily.rolling(200).mean()
+        
+        phase_series = pd.Series(
+            np.where(bench_daily >= sma_200, "Bull", "Bear"),
+            index=bench_daily.index
+        )
+        
+        # --- Fixed Historical Periods ---
+        fixed_periods = [
+            ("Bull", "2017-01-01", "2018-01-31", "Demonetization recovery + GST rally"),
+            ("Bear", "2018-02-01", "2019-03-31", "IL&FS crisis, NBFC selloff"),
+            ("Bull", "2019-04-01", "2020-01-31", "Election rally"),
+            ("Bear", "2020-02-01", "2020-03-31", "COVID crash"),
+            ("Bull", "2020-04-01", "2021-10-31", "COVID recovery, massive rally"),
+            ("Bear", "2021-11-01", "2022-06-30", "Fed rate hike, FII selloff"),
+            ("Bull", "2022-07-01", "2024-09-30", "Recovery + India outperformance"),
+            ("Bear", "2024-10-01", "2026-06-30", "FII selloff + geopolitical multi-shock"),
+        ]
+        
+        # --- Mode Toggle ---
+        mode = st.radio("Phase detection mode", ["Fixed Historical", "Auto 200-SMA"], horizontal=True, key="bb_mode")
+        
+        # --- Fund Returns per Phase ---
+        fund_prices = r["prices"]["fund"].copy()
+        bench_prices = r["prices"]["benchmark"].copy()
+        
+        rows_bb = []
+        
+        if mode == "Fixed Historical":
+            for phase, start, end, reason in fixed_periods:
+                s = pd.Timestamp(start)
+                e = pd.Timestamp(end)
+                f_slice = fund_prices[(fund_prices.index >= s) & (fund_prices.index <= e)]
+                b_slice = bench_prices[(bench_prices.index >= s) & (bench_prices.index <= e)]
+                if len(f_slice) < 5 or len(b_slice) < 5:
+                    continue
+                f_ret = (f_slice.iloc[-1] / f_slice.iloc[0] - 1)
+                b_ret = (b_slice.iloc[-1] / b_slice.iloc[0] - 1)
+                rows_bb.append({
+                    "Phase": phase,
+                    "Period": f"{start} to {end}",
+                    "Reason": reason,
+                    "Fund Return": f_ret,
+                    "Benchmark Return": b_ret,
+                    "Outperformance": f_ret - b_ret,
+                })
+        else:
+            # Auto SMA mode — group consecutive same-phase days
+            phase_df = pd.DataFrame({
+                "price": bench_daily,
+                "sma200": sma_200,
+                "phase": phase_series
+            }).dropna()
+            
+            phase_df["group"] = (phase_df["phase"] != phase_df["phase"].shift()).cumsum()
+            
+            for grp_id, grp in phase_df.groupby("group"):
+                if len(grp) < 20:
+                    continue
+                phase = grp["phase"].iloc[0]
+                s = grp.index[0]
+                e = grp.index[-1]
+                f_slice = fund_prices[(fund_prices.index >= s) & (fund_prices.index <= e)]
+                b_slice = bench_prices[(bench_prices.index >= s) & (bench_prices.index <= e)]
+                if len(f_slice) < 5 or len(b_slice) < 5:
+                    continue
+                f_ret = (f_slice.iloc[-1] / f_slice.iloc[0] - 1)
+                b_ret = (b_slice.iloc[-1] / b_slice.iloc[0] - 1)
+                rows_bb.append({
+                    "Phase": phase,
+                    "Period": f"{s.strftime('%Y-%m-%d')} to {e.strftime('%Y-%m-%d')}",
+                    "Reason": "Auto 200-SMA detected",
+                    "Fund Return": f_ret,
+                    "Benchmark Return": b_ret,
+                    "Outperformance": f_ret - b_ret,
+                })
+        
+        if not rows_bb:
+            st.info("Not enough data for the selected period. Try 10-year period.")
+        else:
+            df_bb = pd.DataFrame(rows_bb)
+            
+            # --- Summary Metrics ---
+            bull_rows = df_bb[df_bb["Phase"] == "Bull"]
+            bear_rows = df_bb[df_bb["Phase"] == "Bear"]
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.markdown(metric_card(
+                "Avg Bull Return", 
+                pct(bull_rows["Fund Return"].mean()) if not bull_rows.empty else "N/A",
+                f"Benchmark {pct(bull_rows['Benchmark Return'].mean()) if not bull_rows.empty else 'N/A'}"
+            ), unsafe_allow_html=True)
+            m2.markdown(metric_card(
+                "Avg Bear Return",
+                pct(bear_rows["Fund Return"].mean()) if not bear_rows.empty else "N/A",
+                f"Benchmark {pct(bear_rows['Benchmark Return'].mean()) if not bear_rows.empty else 'N/A'}",
+                "bad"
+            ), unsafe_allow_html=True)
+            m3.markdown(metric_card(
+                "Bull Outperformance",
+                pct(bull_rows["Outperformance"].mean()) if not bull_rows.empty else "N/A",
+                "Avg alpha in bull phases",
+                signed_class(bull_rows["Outperformance"].mean() if not bull_rows.empty else 0)
+            ), unsafe_allow_html=True)
+            m4.markdown(metric_card(
+                "Bear Outperformance",
+                pct(bear_rows["Outperformance"].mean()) if not bear_rows.empty else "N/A",
+                "Avg alpha in bear phases",
+                signed_class(bear_rows["Outperformance"].mean() if not bear_rows.empty else 0)
+            ), unsafe_allow_html=True)
+            
+            # --- Bar Chart ---
+            go = plotly_go()
+            if go:
+                fig = go.Figure()
+                colors_fund = [GREEN if v >= 0 else RED for v in df_bb["Fund Return"]]
+                colors_bench = [BLUE] * len(df_bb)
+                
+                fig.add_trace(go.Bar(
+                    name="Fund", x=df_bb["Period"],
+                    y=df_bb["Fund Return"] * 100,
+                    marker_color=colors_fund
+                ))
+                fig.add_trace(go.Bar(
+                    name="Benchmark", x=df_bb["Period"],
+                    y=df_bb["Benchmark Return"] * 100,
+                    marker_color=BLUE, opacity=0.6
+                ))
+                fig.add_hline(y=0, line_dash="dot", line_color="#98A2B3")
+                fig.update_layout(
+                    title="Fund vs Benchmark — Bull & Bear Phases",
+                    barmode="group",
+                    paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=400,
+                    margin=dict(l=10, r=10, t=45, b=10),
+                    xaxis=dict(gridcolor=GRID, color=MUTED, tickangle=-30),
+                    yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # --- SMA Chart ---
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(
+                    x=bench_daily.index, y=bench_daily.values,
+                    name=r["benchmark_label"], line=dict(color=BLUE, width=1.8)
+                ))
+                fig2.add_trace(go.Scatter(
+                    x=sma_200.dropna().index, y=sma_200.dropna().values,
+                    name="200-day SMA", line=dict(color=ORANGE, width=2, dash="dash")
+                ))
+                fig2.update_layout(
+                    title="Benchmark Price vs 200-day SMA",
+                    paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=320,
+                    margin=dict(l=10, r=10, t=45, b=10),
+                    xaxis=dict(gridcolor=GRID, color=MUTED),
+                    yaxis=dict(gridcolor=GRID, color=MUTED),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+            
+            # --- Table ---
+            display_bb = df_bb.copy()
+            display_bb["Fund Return"] = display_bb["Fund Return"].apply(pct)
+            display_bb["Benchmark Return"] = display_bb["Benchmark Return"].apply(pct)
+            display_bb["Outperformance"] = display_bb["Outperformance"].apply(pct)
+            st.dataframe(display_bb, use_container_width=True, hide_index=True)
+          
     with validation:
         st.caption("Recomputes key values using Excel-equivalent formulas to verify the calculation backend.")
         val = pd.DataFrame(excel_validation_rows(r))
