@@ -56,7 +56,7 @@ BENCHMARKS = {
     "Nifty 500": {"ticker": "^CRSLDX", "label": "Nifty 500", "fallback": "^NSEI"},
     "Nifty Midcap 50": {"ticker": "^NSEMDCP50", "label": "Nifty Midcap 50", "fallback": "^NSEI"},
     "Nifty Midcap 150": {"ticker": "^NSMIDCP", "label": "Nifty Midcap 150", "fallback": "^NSEMDCP50"},
-    "Nifty Smallcap 100": {"ticker": "^CNXSC", "label": "Nifty Smallcap 100", "fallback": "^NSEI"},
+    "Nifty Smallcap 100": {"ticker": "NIFTYSMLCAP100.NS", "label": "Nifty Smallcap 100", "fallback": "^CNXSC"},
     "Sensex": {"ticker": "^BSESN", "label": "Sensex", "fallback": "^NSEI"},
 }
 
