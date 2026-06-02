@@ -1856,12 +1856,20 @@ def page_analyze():
 
 
 def page_compare():
-    st.markdown("<div class='page-note'>Compare funds on one benchmark and one calculation basis. This keeps the comparison fair and avoids mixed assumptions.</div>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        fund_a = search_fund_widget("compare_a", "First fund")
-    with c2:
-        fund_b = search_fund_widget("compare_b", "Second fund")
+    st.markdown("<div class='page-note'>Compare multiple funds on one benchmark and one calculation basis. This keeps the comparison fair and avoids mixed assumptions.</div>", unsafe_allow_html=True)
+    
+    # --- How many funds ---
+    n_funds = st.slider("How many funds to compare?", min_value=2, max_value=10, value=2, step=1)
+    
+    # --- Fund search widgets ---
+    funds = []
+    cols = st.columns(2)
+    for i in range(n_funds):
+        with cols[i % 2]:
+            fund = search_fund_widget(f"compare_{i}", f"Fund {i+1}")
+            funds.append(fund)
+    
+    # --- Settings ---
     a, b, c = st.columns(3)
     with a:
         benchmark_choice = st.selectbox("Benchmark", list(BENCHMARKS.keys()), index=0, key="compare_bench")
@@ -1874,59 +1882,122 @@ def page_compare():
 
     if not run:
         return
-    if not fund_a or not fund_b:
-        st.warning("Select both funds before comparing.")
+    
+    selected = [f for f in funds if f is not None]
+    if len(selected) < 2:
+        st.warning("At least 2 funds select karo.")
         return
 
     results = []
-    with st.spinner("Calculating both funds on matched assumptions..."):
-        for fund in [fund_a, fund_b]:
+    with st.spinner(f"Calculating {len(selected)} funds on matched assumptions..."):
+        for fund in selected:
             result, err = run_capm_analysis(fund["code"], fund["name"], fund["category"], benchmark_choice, years, frequency, rf_annual)
             if err:
                 st.warning(f"{fund['name'][:50]}: {err}")
             else:
                 results.append(result)
+    
     if len(results) < 2:
         return
 
-    section("Comparison Table")
+    section(f"Comparison Table — {len(results)} Funds")
     rows = []
     for r in results:
-        rows.append(
-            {
-                "Fund": r["fund_name"][:60],
-                "Category": category_label(r["category"]),
-                "Annual Return": pct(r["fund_return_ann"]),
-                "CAGR": pct(r["fund_cagr"]),
-                "Alpha": pct(r["alpha"]),
-                "Beta": num(r["beta"], 2),
-                "Sharpe": num(r["sharpe"], 2),
-                "Sortino": num(r["sortino"], 2),
-                "Max DD": pct(r["max_drawdown"]),
-                "Tracking Error": pct(r["tracking_error"]),
-            }
-        )
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    section("Growth Comparison")
-    go = plotly_go()
-    if go is None:
-        return
-    fig = go.Figure()
-    for idx, r in enumerate(results):
-        fig.add_trace(go.Scatter(x=r["growth"].index, y=r["growth"]["fund"], name=r["fund_name"][:32], line=dict(color=[TEAL, ORANGE][idx], width=2.4)))
-    fig.update_layout(
-        title="Growth of INR 10,000",
-        paper_bgcolor=PLOT_BG,
-        plot_bgcolor=PLOT_BG,
-        height=360,
-        margin=dict(l=10, r=10, t=45, b=10),
-        xaxis=dict(gridcolor=GRID, color=MUTED),
-        yaxis=dict(gridcolor=GRID, color=MUTED, tickprefix="INR "),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        hovermode="x unified",
+        score = fund_score(r)
+        rows.append({
+            "Fund": r["fund_name"][:45],
+            "Category": category_label(r["category"]),
+            "Score": score["total"],
+            "Verdict": score["verdict"],
+            "Annual Return": pct(r["fund_return_ann"]),
+            "CAGR": pct(r["fund_cagr"]),
+            "Alpha": pct(r["alpha"]),
+            "Beta": num(r["beta"], 2),
+            "Sharpe": num(r["sharpe"], 2),
+            "Sortino": num(r["sortino"], 2),
+            "Treynor": num(r["treynor"], 3),
+            "Max DD": pct(r["max_drawdown"]),
+            "Volatility": pct(r["fund_volatility"]),
+            "Tracking Error": pct(r["tracking_error"]),
+            "Info Ratio": num(r["information_ratio"], 2),
+        })
+    
+    df_compare = pd.DataFrame(rows).sort_values("Score", ascending=False)
+    st.dataframe(df_compare, use_container_width=True, hide_index=True)
+    
+    # --- Best fund highlight ---
+    best = df_compare.iloc[0]
+    st.markdown(
+        f"<div class='page-note'>🏆 <b>{esc(best['Fund'])}</b> scored highest — {best['Score']}/100 ({best['Verdict']}) with alpha {best['Alpha']} and Sharpe {best['Sharpe']}.</div>",
+        unsafe_allow_html=True,
     )
-    st.plotly_chart(fig, use_container_width=True)
+
+    # --- Growth Chart ---
+    section("Growth of INR 10,000")
+    go = plotly_go()
+    if go:
+        colors_list = [TEAL, ORANGE, BLUE, GREEN, RED, GOLD, NAVY, "#7C3AED", "#DB2777", "#0891B2"]
+        fig = go.Figure()
+        for idx, r in enumerate(results):
+            fig.add_trace(go.Scatter(
+                x=r["growth"].index,
+                y=r["growth"]["fund"],
+                name=r["fund_name"][:30],
+                line=dict(color=colors_list[idx % len(colors_list)], width=2.2)
+            ))
+        fig.update_layout(
+            title="Growth of INR 10,000 — All Funds",
+            paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=420,
+            margin=dict(l=10, r=10, t=45, b=10),
+            xaxis=dict(gridcolor=GRID, color=MUTED),
+            yaxis=dict(gridcolor=GRID, color=MUTED, tickprefix="INR "),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # --- Risk vs Return Scatter ---
+    section("Risk vs Return")
+    if go:
+        fig2 = go.Figure()
+        for idx, r in enumerate(results):
+            fig2.add_trace(go.Scatter(
+                x=[r["fund_volatility"] * 100],
+                y=[r["fund_return_ann"] * 100],
+                mode="markers+text",
+                name=r["fund_name"][:20],
+                text=[r["fund_name"][:20]],
+                textposition="top center",
+                marker=dict(size=14, color=colors_list[idx % len(colors_list)])
+            ))
+        fig2.update_layout(
+            title="Risk vs Return — All Funds",
+            paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=420,
+            margin=dict(l=10, r=10, t=45, b=10),
+            xaxis=dict(title="Volatility (%)", gridcolor=GRID, color=MUTED),
+            yaxis=dict(title="Annual Return (%)", gridcolor=GRID, color=MUTED),
+            showlegend=False,
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # --- Alpha Bar Chart ---
+    section("Jensen Alpha Comparison")
+    if go:
+        names = [r["fund_name"][:25] for r in results]
+        alphas = [r["alpha"] * 100 for r in results]
+        fig3 = go.Figure(go.Bar(
+            x=names, y=alphas,
+            marker_color=[GREEN if a >= 0 else RED for a in alphas]
+        ))
+        fig3.add_hline(y=0, line_dash="dot", line_color="#98A2B3")
+        fig3.update_layout(
+            title="Jensen Alpha — All Funds",
+            paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=360,
+            margin=dict(l=10, r=10, t=45, b=10),
+            xaxis=dict(gridcolor=GRID, color=MUTED, tickangle=-20),
+            yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
+        )
+        st.plotly_chart(fig3, use_container_width=True)
 
 
 def benchmark_health_rows(years=4):
