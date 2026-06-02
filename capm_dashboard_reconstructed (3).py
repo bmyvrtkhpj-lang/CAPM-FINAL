@@ -825,7 +825,7 @@ def fund_score(r):
     }
 
 
-def score_notes(r, score):
+def score_notes(r):
     notes = []
     notes.append("Positive CAPM alpha supports the score." if r["alpha"] > 0 else "Negative CAPM alpha is the main drag.")
     notes.append("Drawdown is controlled versus a high-risk equity profile." if abs(r["max_drawdown"]) < 0.25 else "Drawdown risk is meaningful and needs position sizing.")
@@ -1016,7 +1016,7 @@ def render_score_panel(r):
     c5.markdown(metric_card("Consistency", f"{score['Consistency']}/100", "Sharpe, Sortino, IR"), unsafe_allow_html=True)
     st.markdown(
         "<div class='panel'><div class='card-title'>Score Interpretation</div>"
-        + "".join(f"<div class='row'><span>{idx}</span><span>{esc(note)}</span></div>" for idx, note in enumerate(score_notes(r, score), 1))
+        + "".join(f"<div class='row'><span>{idx}</span><span>{esc(note)}</span></div>" for idx, note in enumerate(score_notes(r), 1))
         + "</div>",
         unsafe_allow_html=True,
     )
