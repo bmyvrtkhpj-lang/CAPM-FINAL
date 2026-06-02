@@ -53,10 +53,10 @@ GRID = "#E8EEF3"
 BENCHMARKS = {
     "Auto by category": {"ticker": "auto", "label": "Auto by category", "fallback": "^NSEI"},
     "Nifty 50": {"ticker": "^NSEI", "label": "Nifty 50", "fallback": "^BSESN"},
-    "Nifty 500": {"ticker": "NSE500.NS", "label": "Nifty 500", "fallback": "^NSEI"},
+    "Nifty 500": {"ticker": "^CRSLDX", "label": "Nifty 500", "fallback": "^NSEI"},
     "Nifty Midcap 50": {"ticker": "^NSEMDCP50", "label": "Nifty Midcap 50", "fallback": "^NSEI"},
     "Nifty Midcap 150": {"ticker": "^NSMIDCP", "label": "Nifty Midcap 150", "fallback": "^NSEMDCP50"},
-    "Nifty Smallcap 250": {"ticker": "NIFTYSMLCAP250.NS", "label": "Nifty Smallcap 250", "fallback": "^NSEI"},
+    "Nifty Smallcap 100": {"ticker": "^CNXSC", "label": "Nifty Smallcap 100", "fallback": "^NSEI"},
     "Sensex": {"ticker": "^BSESN", "label": "Sensex", "fallback": "^NSEI"},
 }
 
@@ -64,7 +64,7 @@ CATEGORY_BENCHMARK = {
     "LargeCap": "Nifty 50",
     "FlexiCap": "Nifty 500",
     "MidCap": "Nifty Midcap 150",
-    "SmallCap": "Nifty Smallcap 250",
+    "SmallCap": "Nifty Smallcap 100",
     "ELSS": "Nifty 50",
     "Debt": "Nifty 50",
     "Hybrid": "Nifty 50",
