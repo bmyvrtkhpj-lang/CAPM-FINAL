@@ -1044,7 +1044,7 @@ def render_result_summary(r):
 
 def render_result_tabs(r):
     overview, score_tab, performance, benchmark_tab, sip_tab, risk, capm, charts, validation, data = st.tabs(
-        ["Overview", "Score", "Performance", "Benchmark", "SIP Backtest", "Risk", "CAPM", "Charts", "Validation", "Data"]
+        ["Overview", "Score", "Performance", "Benchmark", "SIP Backtest", "Risk", "CAPM", "Charts", "Rolling Returns", "Validation", "Data"]
     )
     with overview:
         a, b, c = st.columns(3)
@@ -1189,6 +1189,98 @@ def render_result_tabs(r):
         with c2:
             chart_rolling(r)
         chart_rolling_capm(r)
+
+    with rolling_tab:
+        st.caption("Rolling returns show consistency of performance across different time windows.")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            window = st.selectbox("Rolling window", ["1 Year", "2 Year", "3 Year"], key="rolling_window")
+        with c2:
+            roll_freq = st.radio("Frequency", ["Daily", "Monthly"], horizontal=True, key="rolling_freq")
+        
+        window_map = {"1 Year": 1, "2 Year": 2, "3 Year": 3}
+        years_roll = window_map[window]
+        periods_roll = 252 if roll_freq == "Daily" else 12
+        roll_days = int(years_roll * periods_roll)
+        
+        fund_prices_roll = r["prices"]["fund"]
+        bench_prices_roll = r["prices"]["benchmark"]
+        
+        if roll_freq == "Monthly":
+            fund_prices_roll = fund_prices_roll.resample("ME").last().dropna()
+            bench_prices_roll = bench_prices_roll.resample("ME").last().dropna()
+        
+        rolling_fund_ret = fund_prices_roll.pct_change(roll_days).dropna() * 100
+        rolling_bench_ret = bench_prices_roll.pct_change(roll_days).dropna() * 100
+        rolling_outperform = rolling_fund_ret - rolling_bench_ret.reindex(rolling_fund_ret.index)
+        
+        # Metrics
+        pct_outperform = (rolling_outperform > 0).sum() / len(rolling_outperform) * 100 if len(rolling_outperform) > 0 else 0
+        avg_roll_fund = rolling_fund_ret.mean()
+        avg_roll_bench = rolling_bench_ret.mean()
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.markdown(metric_card("Avg Rolling Return", pct(avg_roll_fund/100), f"{window} windows"), unsafe_allow_html=True)
+        m2.markdown(metric_card("Avg Benchmark Return", pct(avg_roll_bench/100), f"{window} windows"), unsafe_allow_html=True)
+        m3.markdown(metric_card("Outperformance %", f"{pct_outperform:.1f}%", "Windows fund beat benchmark"), unsafe_allow_html=True)
+        m4.markdown(metric_card("Total Windows", str(len(rolling_fund_ret)), f"{window} rolling"), unsafe_allow_html=True)
+        
+        # Chart
+        go = plotly_go()
+        if go and not rolling_fund_ret.empty:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=rolling_fund_ret.index, y=rolling_fund_ret.values,
+                name="Fund", line=dict(color=TEAL, width=2.2)
+            ))
+            fig.add_trace(go.Scatter(
+                x=rolling_bench_ret.dropna().index, y=rolling_bench_ret.dropna().values,
+                name=r["benchmark_label"], line=dict(color=BLUE, width=1.9, dash="dash")
+            ))
+            fig.add_hline(y=0, line_dash="dot", line_color="#98A2B3")
+            fig.update_layout(
+                title=f"Rolling {window} Return",
+                paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=340,
+                margin=dict(l=10, r=10, t=45, b=10),
+                xaxis=dict(gridcolor=GRID, color=MUTED),
+                yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Outperformance chart
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                x=rolling_outperform.index, y=rolling_outperform.values,
+                name="Outperformance",
+                marker_color=[GREEN if v > 0 else RED for v in rolling_outperform.values]
+            ))
+            fig2.add_hline(y=0, line_dash="dot", line_color="#98A2B3")
+            fig2.update_layout(
+                title=f"Rolling {window} Outperformance (Fund minus Benchmark)",
+                paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=300,
+                margin=dict(l=10, r=10, t=45, b=10),
+                xaxis=dict(gridcolor=GRID, color=MUTED),
+                yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        # Table
+        if not rolling_fund_ret.empty:
+            roll_table = pd.DataFrame({
+                "Date": rolling_fund_ret.index,
+                "Fund Rolling Return": rolling_fund_ret.values / 100,
+                "Benchmark Rolling Return": rolling_bench_ret.reindex(rolling_fund_ret.index).values / 100,
+                "Outperformance": rolling_outperform.values / 100,
+            })
+            roll_table["Date"] = roll_table["Date"].dt.strftime("%Y-%m-%d")
+            roll_table["Fund Rolling Return"] = roll_table["Fund Rolling Return"].apply(lambda x: pct(x))
+            roll_table["Benchmark Rolling Return"] = roll_table["Benchmark Rolling Return"].apply(lambda x: pct(x))
+            roll_table["Outperformance"] = roll_table["Outperformance"].apply(lambda x: pct(x))
+            st.dataframe(roll_table.tail(24), use_container_width=True, hide_index=True)
     with validation:
         st.caption("Recomputes key values using Excel-equivalent formulas to verify the calculation backend.")
         val = pd.DataFrame(excel_validation_rows(r))
