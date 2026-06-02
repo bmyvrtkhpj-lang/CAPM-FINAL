@@ -459,8 +459,9 @@ def run_capm_analysis(scheme_code, fund_name, category, benchmark_choice, years,
     benchmark_volatility = float(b_ret.std(ddof=1)) * np.sqrt(periods)
     active = f_ret - b_ret
     tracking_error = float(active.std(ddof=1)) * np.sqrt(periods)
-    downside = f_ret[f_ret < rf_period] - rf_period
-    downside_std = float(np.sqrt((downside**2).mean())) * np.sqrt(periods) if len(downside) else np.nan
+    # NAYI lines (daalo):
+    downside_returns = np.minimum(f_ret - rf_period, 0)
+    downside_std = float(np.sqrt((downside_returns**2).sum() / len(f_ret))) * np.sqrt(periods)
 
     sharpe = (fund_return_ann - float(rf_annual)) / fund_volatility if fund_volatility else np.nan
     sortino = (fund_return_ann - float(rf_annual)) / downside_std if downside_std else np.nan
