@@ -1282,7 +1282,7 @@ def render_result_tabs(r):
             roll_table["Outperformance"] = roll_table["Outperformance"].apply(lambda x: pct(x))
             st.dataframe(roll_table.tail(24), use_container_width=True, hide_index=True)
     
-  with bull_bear_tab:
+    with bull_bear_tab:
         st.caption("Bull and Bear phases identified using Nifty 50 200-day SMA. Price above SMA = Bull, below = Bear.")
         
         # --- SMA Calculation on Benchmark ---
