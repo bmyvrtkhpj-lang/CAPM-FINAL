@@ -332,10 +332,16 @@ def fetch_yahoo_series(ticker, start_date, end_date):
     )
     if data is None or data.empty:
         return pd.Series(dtype=float)
+      
+    # Flatten MultiIndex columns (newer yfinance versions)
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
       
-    close = data["Close"].squeeze()
+# Extract Close — force to Series regardless of shape
+    close = data["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+      
     close = pd.to_numeric(close, errors="coerce").dropna()
     close.index = pd.to_datetime(close.index).tz_localize(None)
     close.name = "benchmark"
