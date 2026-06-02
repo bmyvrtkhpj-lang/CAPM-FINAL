@@ -1122,6 +1122,7 @@ def render_result_tabs(r):
             }
         )
         st.dataframe(bench_table.tail(250), use_container_width=True, hide_index=True)
+      
     with sip_tab:
         st.caption("Backtests a monthly SIP on actual fund NAV history for the selected analysis period.")
         a, b = st.columns(2)
@@ -1141,6 +1142,75 @@ def render_result_tabs(r):
             display = sip_df.copy()
             display["Date"] = display["Date"].dt.strftime("%Y-%m-%d")
             st.dataframe(display.tail(24), use_container_width=True, hide_index=True)
+
+            try:
+                from scipy.optimize import brentq
+                
+                def xirr_calc(df, initial_lump=0):
+                    cashflows = []
+                    dates = []
+                    
+                    # Initial lumpsum
+                    if initial_lump > 0:
+                        cashflows.append(-initial_lump)
+                        dates.append(df["Date"].iloc[0])
+                    
+                    # Monthly SIP outflows
+                    for _, row in df.iterrows():
+                        cashflows.append(-monthly_sip)
+                        dates.append(row["Date"])
+                    
+                    # Final value inflow
+                    cashflows.append(df["Value"].iloc[-1])
+                    dates.append(df["Date"].iloc[-1])
+                    
+                    # Days from first date
+                    d0 = dates[0]
+                    days = [(d - d0).days for d in dates]
+                    
+                    def npv(rate):
+                        return sum(cf / (1 + rate) ** (d / 365.25) for cf, d in zip(cashflows, days))
+                    
+                    try:
+                        rate = brentq(npv, -0.999, 100.0, maxiter=1000)
+                        return rate
+                    except Exception:
+                        return np.nan
+                
+                xirr_val = xirr_calc(sip_df, initial_lump)
+                
+                section("XIRR Analysis")
+                x1, x2, x3 = st.columns(3)
+                x1.markdown(metric_card(
+                    "XIRR", 
+                    pct(xirr_val) if not np.isnan(xirr_val) else "N/A",
+                    "Actual annualized return on SIP",
+                    signed_class(xirr_val) if not np.isnan(xirr_val) else "warn"
+                ), unsafe_allow_html=True)
+                x2.markdown(metric_card(
+                    "Simple CAGR",
+                    pct(r["fund_cagr"]),
+                    "Point to point return",
+                    signed_class(r["fund_cagr"])
+                ), unsafe_allow_html=True)
+                x3.markdown(metric_card(
+                    "XIRR vs CAGR",
+                    pct(xirr_val - r["fund_cagr"]) if not np.isnan(xirr_val) else "N/A",
+                    "Difference — SIP timing effect",
+                    signed_class((xirr_val - r["fund_cagr"]) if not np.isnan(xirr_val) else 0)
+                ), unsafe_allow_html=True)
+                
+                st.markdown(
+                    "<div class='page-note'>"
+                    "<b>XIRR</b> accounts for the exact timing of each SIP installment. "
+                    "It is more accurate than CAGR for SIP investments because CAGR assumes lumpsum. "
+                    "Positive XIRR vs CAGR gap means rupee cost averaging worked in your favour."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                
+            except ImportError:
+                st.info("scipy not installed — XIRR unavailable. Add scipy to requirements.txt")  
     with risk:
         render_suitability_panel(r)
         c1, c2 = st.columns(2)
