@@ -1044,7 +1044,7 @@ def render_result_summary(r):
 
 def render_result_tabs(r):
     overview, score_tab, performance, benchmark_tab, sip_tab, risk, capm, charts, rolling_tab, bull_bear_tab, validation, data = st.tabs(
-        ["Overview", "Score", "Performance", "Benchmark", "SIP Backtest", "Risk", "CAPM", "Charts", "Rolling Returns", "Validation", "Data"]
+        ["Overview", "Score", "Performance", "Benchmark", "SIP Backtest", "Risk", "CAPM", "Charts", "Rolling Returns", "Bull & Bear", "Validation", "Data"]
     )
     with overview:
         a, b, c = st.columns(3)
