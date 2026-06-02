@@ -1283,15 +1283,15 @@ def render_result_tabs(r):
             st.dataframe(roll_table.tail(24), use_container_width=True, hide_index=True)
     
   with bull_bear_tab:
-          st.caption("Bull and Bear phases identified using Nifty 50 200-day SMA. Price above SMA = Bull, below = Bear.")
+        st.caption("Bull and Bear phases identified using Nifty 50 200-day SMA. Price above SMA = Bull, below = Bear.")
         
         # --- SMA Calculation on Benchmark ---
-          bench_daily = r["prices"]["benchmark"].copy()
-          sma_200 = bench_daily.rolling(200).mean()
+        bench_daily = r["prices"]["benchmark"].copy()
+        sma_200 = bench_daily.rolling(200).mean()
         
-          phase_series = pd.Series(
-              np.where(bench_daily >= sma_200, "Bull", "Bear"),
-              index=bench_daily.index
+        phase_series = pd.Series(
+            np.where(bench_daily >= sma_200, "Bull", "Bear"),
+            index=bench_daily.index
         )
         
         # --- Fixed Historical Periods ---
