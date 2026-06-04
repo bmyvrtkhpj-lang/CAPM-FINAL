@@ -282,27 +282,52 @@ def periods_per_year(frequency):
 
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def load_schemes():
-    mf = Mftool()
-    data = mf.get_scheme_codes()
-    df = pd.DataFrame(list(data.items()), columns=["code", "name"])
+    try:
+        # Attempt 1: Try fetching live data from AMFI
+        mf = Mftool()
+        data = mf.get_scheme_codes()
+        df = pd.DataFrame(list(data.items()), columns=["code", "name"])
+    except Exception as e:
+        # Attempt 2: Fallback to offline CSV if AMFI is down
+        st.warning("⚠️ AMFI server is down. Loading offline scheme list.")
+        try:
+            df = pd.read_csv("fallback_amfi_schemes.csv")
+            # Ensure column names match what the app expects
+            if "Scheme_Code" in df.columns:
+                df = df.rename(columns={"Scheme_Code": "code", "Scheme_Name": "name"})
+        except FileNotFoundError:
+            st.error("Critical Error: AMFI is down and 'fallback_amfi_schemes.csv' is missing from your repository.")
+            return pd.DataFrame(columns=["code", "name", "name_lower"])
+
+    # Standardize and clean the data
     df["code"] = df["code"].astype(str)
     df = df[df["code"].str.fullmatch(r"\d+")]
     df["name"] = df["name"].astype(str).str.strip()
     df["name_lower"] = df["name"].str.lower()
     return df.sort_values("name")
 
-
 @st.cache_data(show_spinner=False, ttl=6 * 3600)
 def fetch_fund_nav(scheme_code):
-    mf = Mftool()
-    raw = mf.get_scheme_historical_nav(str(scheme_code), as_Dataframe=True)
-    if raw is None or raw.empty:
+    try:
+        mf = Mftool()
+        raw = mf.get_scheme_historical_nav(str(scheme_code), as_Dataframe=True)
+        if raw is None or raw.empty:
+            return pd.Series(dtype=float)
+            
+        raw.index = pd.to_datetime(raw.index, format="%d-%m-%Y", errors="coerce")
+        raw = raw.dropna().sort_index()
+        nav = pd.to_numeric(raw["nav"], errors="coerce").dropna()
+        nav.name = "fund"
+        return nav
+        
+    except IndexError:
+        # Catches the specific AMFI split error
+        st.error("⚠️ Failed to fetch NAV: AMFI servers are returning invalid data format.")
         return pd.Series(dtype=float)
-    raw.index = pd.to_datetime(raw.index, format="%d-%m-%Y", errors="coerce")
-    raw = raw.dropna().sort_index()
-    nav = pd.to_numeric(raw["nav"], errors="coerce").dropna()
-    nav.name = "fund"
-    return nav
+    except Exception as e:
+        # Catches server timeouts or other connection errors
+        st.error(f"⚠️ Failed to fetch NAV: AMFI servers are temporarily down.")
+        return pd.Series(dtype=float)
 
 
 @st.cache_data(show_spinner=False, ttl=6 * 3600)
