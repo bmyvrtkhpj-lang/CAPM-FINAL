@@ -2300,7 +2300,7 @@ def page_compare():
           <div class="footer-brand">CAPM Research Workbench</div>
         </div>
         </body></html>"""
-        return html_content
+    return html_content
 
     # Yahan spacing theek karni hai! 4 spaces aage khiskana hai:
     html_report = build_html_report(results, benchmark_choice, years, frequency, rf_annual)
