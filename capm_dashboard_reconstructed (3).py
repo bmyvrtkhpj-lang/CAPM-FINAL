@@ -585,8 +585,7 @@ def search_fund_widget(key_prefix, label="Fund", direct_growth_default=True):
         ]
     elif plan_filter == "Regular Growth":
         filtered = filtered[
-            filtered["name_lower"].str.contains("regular", na=False)
-            & filtered["name_lower"].str.contains("growth", na=False)
+            filtered["name_lower"].str.contains("growth", na=False)
             & ~filtered["name_lower"].str.contains("direct|idcw|dividend|payout|bonus", na=False)
         ]
     elif plan_filter == "All Growth":
