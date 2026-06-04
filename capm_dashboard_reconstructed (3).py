@@ -2093,10 +2093,10 @@ def page_compare():
         )
         st.plotly_chart(fig3, use_container_width=True)
       # --- HTML Report Export ---
-section("Export Comparison Report")
+        section("Export Comparison Report")
 
-def build_html_report(results, benchmark_choice, years, frequency, rf_annual):
-    date_str = datetime.now().strftime("%d %B %Y")
+        def build_html_report(results, benchmark_choice, years, frequency, rf_annual):
+            date_str = datetime.now().strftime("%d %B %Y")
     
     # Table rows generate karo
     table_rows = ""
@@ -2290,27 +2290,28 @@ def build_html_report(results, benchmark_choice, years, frequency, rf_annual):
   </div>
 </div>
 
-<div class="footer">
-  <div class="footer-note">
-    <strong>Methodology:</strong> CAPM framework · Benchmark: {benchmark_choice} · {years}-year {frequency.lower()} return data · 
-    Risk-free rate: {pct(rf_annual)} · Alpha = Jensen's Alpha · Verdicts based on composite score. · 
-    <em>Past performance is not a guarantee of future returns. Academic research purposes only.</em>
-  </div>
-  <div class="footer-brand">CAPM Research Workbench</div>
-</div>
-</body></html>"""
-    return html_content
+# ... (upar ka html_content wala part same rahega) ...
+        <div class="footer">
+          <div class="footer-note">
+            <strong>Methodology:</strong> CAPM framework · Benchmark: {benchmark_choice} · {years}-year {frequency.lower()} return data · 
+            Risk-free rate: {pct(rf_annual)} · Alpha = Jensen's Alpha · Verdicts based on composite score. · 
+            <em>Past performance is not a guarantee of future returns. Academic research purposes only.</em>
+          </div>
+          <div class="footer-brand">CAPM Research Workbench</div>
+        </div>
+        </body></html>"""
+        return html_content
 
-html_report = build_html_report(results, benchmark_choice, years, frequency, rf_annual)
-st.download_button(
-    "📄 Export HTML Report",
-    data=html_report,
-    file_name=f"Fund_Comparison_Report_{datetime.now().strftime('%Y%m%d')}.html",
-    mime="text/html",
-    use_container_width=True,
-    key="html_report_download"
-)
-
+    # Yahan spacing theek karni hai! 4 spaces aage khiskana hai:
+    html_report = build_html_report(results, benchmark_choice, years, frequency, rf_annual)
+    st.download_button(
+        "📄 Export HTML Report",
+        data=html_report,
+        file_name=f"Fund_Comparison_Report_{datetime.now().strftime('%Y%m%d')}.html",
+        mime="text/html",
+        use_container_width=True,
+        key="html_report_download"
+    )
 
 
 def benchmark_health_rows(years=4):
