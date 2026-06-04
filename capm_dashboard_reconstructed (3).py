@@ -2092,6 +2092,225 @@ def page_compare():
             yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
         )
         st.plotly_chart(fig3, use_container_width=True)
+      # --- HTML Report Export ---
+section("Export Comparison Report")
+
+def build_html_report(results, benchmark_choice, years, frequency, rf_annual):
+    date_str = datetime.now().strftime("%d %B %Y")
+    
+    # Table rows generate karo
+    table_rows = ""
+    for idx, r in enumerate(results):
+        score = fund_score(r)
+        verdict_class = {
+            "Excellent": "verdict-excellent",
+            "Good": "verdict-good", 
+            "Watch": "verdict-watch",
+            "Weak": "verdict-weak"
+        }.get(score["verdict"], "verdict-watch")
+        
+        rank_color = "#c9a84c" if idx == 0 else "#aaa" if idx == 1 else "#bbb"
+        row_class = "highlight-row" if idx == 0 else ""
+        
+        table_rows += f"""
+        <tr class="{row_class}">
+          <td><span style="font-family:'Playfair Display',serif;font-size:13px;color:{rank_color};font-weight:700">{idx+1}</span></td>
+          <td>{r['fund_name'][:50]}</td>
+          <td><span class="verdict-badge {verdict_class}">{score['verdict']}</span></td>
+          <td>{pct(r['fund_return_ann'])}</td>
+          <td>{pct(r['fund_cagr'])}</td>
+          <td style="color:#1a7a4a;font-weight:600">{pct(r['alpha'])}</td>
+          <td>{num(r['beta'],2)}</td>
+          <td style="font-weight:600">{num(r['sharpe'],2)}</td>
+          <td>{num(r['sortino'],2)}</td>
+          <td>{num(r['treynor'],3)}</td>
+          <td style="color:#b82020">{pct(r['max_drawdown'])}</td>
+          <td>{pct(r['fund_volatility'])}</td>
+          <td>{pct(r['tracking_error'])}</td>
+          <td style="font-weight:600">{num(r['information_ratio'],2)}</td>
+        </tr>"""
+
+    # Alpha bars
+    max_alpha = max(r['alpha'] for r in results) if results else 1
+    alpha_bars = ""
+    sharpe_bars = ""
+    max_sharpe = max(r['sharpe'] for r in results) if results else 1
+    
+    bar_colors = ["#1a7a4a","#2a9a5a","#3aaa6a","#b8651a","#b82020","#888","#555","#333","#777","#999"]
+    
+    for idx, r in enumerate(results):
+        color = bar_colors[idx % len(bar_colors)]
+        alpha_width = max(0, min(100, (r['alpha'] / max_alpha) * 100)) if max_alpha > 0 else 0
+        sharpe_width = max(0, min(100, (r['sharpe'] / max_sharpe) * 100)) if max_sharpe > 0 else 0
+        short_name = r['fund_name'].split()[0] + " " + r['fund_name'].split()[1] if len(r['fund_name'].split()) > 1 else r['fund_name'][:20]
+        
+        alpha_bars += f"""
+        <div class="bar-row">
+          <div class="bar-fund-name">{short_name[:25]}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:{alpha_width:.0f}%;background:{color};"></div></div>
+          <div class="bar-val" style="color:{color}">{pct(r['alpha'])}</div>
+        </div>"""
+        
+        sharpe_bars += f"""
+        <div class="bar-row">
+          <div class="bar-fund-name">{short_name[:25]}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:{sharpe_width:.0f}%;background:{color};"></div></div>
+          <div class="bar-val" style="color:{color}">{num(r['sharpe'],2)}</div>
+        </div>"""
+
+    best = results[0]
+    best_score = fund_score(best)
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fund Comparison Report</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {{
+    --ink: #0d1117; --paper: #f8f5ef; --gold: #c9a84c; --gold-light: #e8d5a3;
+    --rule: #d4c9b0; --green: #1a7a4a; --amber: #b8651a; --red: #b82020; --muted: #6b6355;
+  }}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:var(--paper); color:var(--ink); font-family:'DM Sans',sans-serif; font-size:11px; line-height:1.5; padding:28px 32px; max-width:980px; margin:0 auto; }}
+  .masthead {{ border-top:3px solid var(--ink); border-bottom:1px solid var(--rule); padding:10px 0 8px; display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px; }}
+  .masthead h1 {{ font-family:'Playfair Display',serif; font-size:22px; font-weight:900; line-height:1; }}
+  .masthead .subtitle {{ font-size:9.5px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-top:3px; }}
+  .masthead-right {{ text-align:right; font-size:9px; color:var(--muted); font-family:'DM Mono',monospace; line-height:1.7; }}
+  .masthead-right strong {{ color:var(--ink); }}
+  .meta-row {{ display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }}
+  .meta-pill {{ background:var(--ink); color:var(--paper); font-size:8.5px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:2px; }}
+  .meta-pill.outline {{ background:transparent; border:1px solid var(--rule); color:var(--muted); }}
+  .section-label {{ font-size:8px; font-weight:600; letter-spacing:.15em; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--rule); padding-bottom:3px; margin-bottom:8px; margin-top:16px; }}
+  .winner-banner {{ background:#fffdf5; color:var(--ink); border:2px solid var(--ink); border-left:6px solid var(--gold); padding:10px 14px; display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; position:relative; overflow:hidden; }}
+  .winner-banner::before {{ content:'★'; position:absolute; right:140px; top:50%; transform:translateY(-50%); font-size:48px; color:var(--gold); opacity:.25; line-height:1; }}
+  .winner-name {{ font-family:'Playfair Display',serif; font-size:13px; font-weight:700; color:var(--ink); line-height:1.2; }}
+  .winner-sub {{ font-size:8.5px; color:var(--muted); margin-top:2px; }}
+  .score-num {{ font-family:'DM Mono',monospace; font-size:28px; font-weight:500; color:var(--gold); line-height:1; }}
+  .score-label {{ font-size:8px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; }}
+  table {{ width:100%; border-collapse:collapse; font-size:10px; }}
+  thead tr {{ border-bottom:2px solid var(--ink); }}
+  th {{ font-size:7.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); padding:5px 6px 4px; text-align:right; white-space:nowrap; }}
+  th:first-child, th:nth-child(2) {{ text-align:left; }}
+  td {{ padding:7px 6px; text-align:right; font-family:'DM Mono',monospace; font-size:9.5px; border-bottom:1px solid var(--rule); white-space:nowrap; }}
+  td:first-child {{ font-family:'DM Sans',sans-serif; font-size:9px; text-align:left; font-weight:500; max-width:180px; white-space:normal; line-height:1.3; }}
+  td:nth-child(2) {{ text-align:left; font-family:'DM Sans',sans-serif; font-size:9px; max-width:200px; white-space:normal; line-height:1.3; }}
+  td:nth-child(3) {{ text-align:left; }}
+  .verdict-badge {{ display:inline-block; font-size:7.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; border-radius:2px; }}
+  .verdict-excellent {{ background:#d4edda; color:var(--green); }}
+  .verdict-good {{ background:#d0e4f7; color:#3a6fa8; }}
+  .verdict-watch {{ background:#fde9d0; color:var(--amber); }}
+  .verdict-weak {{ background:#fdd; color:var(--red); }}
+  .highlight-row {{ background:#f0ece3; }}
+  .metrics-grid {{ display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--rule); border:1px solid var(--rule); margin-bottom:16px; }}
+  .metric-cell {{ background:var(--paper); padding:7px 8px; }}
+  .metric-cell .m-name {{ font-size:7.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:2px; }}
+  .metric-cell .m-meaning {{ font-size:8.5px; color:var(--ink); line-height:1.4; }}
+  .bar-row {{ display:flex; align-items:center; gap:8px; margin-bottom:5px; }}
+  .bar-fund-name {{ width:150px; font-size:8.5px; text-align:right; color:var(--muted); flex-shrink:0; line-height:1.2; }}
+  .bar-track {{ flex:1; height:14px; background:#ede9e0; border-radius:2px; position:relative; overflow:hidden; }}
+  .bar-fill {{ height:100%; border-radius:2px; }}
+  .bar-val {{ width:40px; font-family:'DM Mono',monospace; font-size:9px; font-weight:500; flex-shrink:0; }}
+  .bar-title {{ font-size:8px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:5px; margin-top:10px; }}
+  .footer {{ border-top:1px solid var(--rule); padding-top:7px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-top:16px; }}
+  .footer-note {{ font-size:7.5px; color:var(--muted); line-height:1.6; flex:1; }}
+  .footer-brand {{ font-family:'Playfair Display',serif; font-size:9px; color:var(--muted); text-align:right; white-space:nowrap; }}
+  @media print {{ body {{ padding:12px 14px; }} }}
+</style>
+</head>
+<body>
+<div class="masthead">
+  <div>
+    <h1>Fund Comparison Report</h1>
+    <div class="subtitle">Equity Research · CAPM Risk-Return Analysis · {len(results)} Funds</div>
+  </div>
+  <div class="masthead-right">
+    <strong>Benchmark:</strong> {benchmark_choice}<br>
+    <strong>Period:</strong> {years} Years · {frequency}<br>
+    <strong>Risk-Free Rate:</strong> {pct(rf_annual)}<br>
+    <strong>Date:</strong> {date_str}
+  </div>
+</div>
+
+<div class="meta-row">
+  <span class="meta-pill">CAPM Framework</span>
+  <span class="meta-pill">Jensen Alpha · Sharpe · Sortino · Treynor</span>
+  <span class="meta-pill outline">{len(results)} Funds Compared</span>
+</div>
+
+<div class="section-label">Top Performer</div>
+<div class="winner-banner">
+  <div>
+    <div class="winner-name">{best['fund_name'][:55]}</div>
+    <div class="winner-sub">Score: {best_score['total']} / 100 · {best_score['verdict']}</div>
+  </div>
+  <div style="text-align:right">
+    <div class="score-num">{best_score['total']}</div>
+    <div class="score-label">{best_score['verdict'].upper()}</div>
+  </div>
+</div>
+
+<div class="section-label">Fund Comparison Table</div>
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>Fund Name</th><th>Verdict</th><th>Annual Ret.</th>
+      <th>CAGR</th><th>Alpha α</th><th>Beta β</th><th>Sharpe</th>
+      <th>Sortino</th><th>Treynor</th><th>Max DD</th><th>Volatility</th>
+      <th>Track.Err</th><th>Info Ratio</th>
+    </tr>
+  </thead>
+  <tbody>{table_rows}</tbody>
+</table>
+
+<div class="section-label">Metric Glossary</div>
+<div class="metrics-grid">
+  <div class="metric-cell"><div class="m-name">Alpha (α)</div><div class="m-meaning">Excess return over CAPM prediction — pure manager skill.</div></div>
+  <div class="metric-cell"><div class="m-name">Beta (β)</div><div class="m-meaning">Market sensitivity. β&lt;1 = defensive; β&gt;1 = amplifies moves.</div></div>
+  <div class="metric-cell"><div class="m-name">Sharpe</div><div class="m-meaning">Return per unit of total risk. Above 0.8 is strong.</div></div>
+  <div class="metric-cell"><div class="m-name">Sortino</div><div class="m-meaning">Like Sharpe but penalises only downside volatility.</div></div>
+  <div class="metric-cell"><div class="m-name">Treynor</div><div class="m-meaning">Return per unit of market risk (beta).</div></div>
+  <div class="metric-cell"><div class="m-name">Max Drawdown</div><div class="m-meaning">Worst peak-to-trough fall. Less negative = better protection.</div></div>
+  <div class="metric-cell"><div class="m-name">Volatility</div><div class="m-meaning">Annualised std dev of daily returns — how much NAV swings.</div></div>
+  <div class="metric-cell"><div class="m-name">Tracking Error</div><div class="m-meaning">How far fund strays from benchmark. Higher = more active.</div></div>
+  <div class="metric-cell"><div class="m-name">Info Ratio</div><div class="m-meaning">Alpha per unit of active risk. Above 0.5 = consistent management.</div></div>
+  <div class="metric-cell"><div class="m-name">CAGR</div><div class="m-meaning">Compound Annual Growth Rate — actual compounded return.</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+  <div>
+    <div class="bar-title">Jensen Alpha (%) — Higher = Manager Skill</div>
+    {alpha_bars}
+  </div>
+  <div>
+    <div class="bar-title">Sharpe Ratio — Return per Unit Risk</div>
+    {sharpe_bars}
+  </div>
+</div>
+
+<div class="footer">
+  <div class="footer-note">
+    <strong>Methodology:</strong> CAPM framework · Benchmark: {benchmark_choice} · {years}-year {frequency.lower()} return data · 
+    Risk-free rate: {pct(rf_annual)} · Alpha = Jensen's Alpha · Verdicts based on composite score. · 
+    <em>Past performance is not a guarantee of future returns. Academic research purposes only.</em>
+  </div>
+  <div class="footer-brand">CAPM Research Workbench</div>
+</div>
+</body></html>"""
+    return html_content
+
+html_report = build_html_report(results, benchmark_choice, years, frequency, rf_annual)
+st.download_button(
+    "📄 Export HTML Report",
+    data=html_report,
+    file_name=f"Fund_Comparison_Report_{datetime.now().strftime('%Y%m%d')}.html",
+    mime="text/html",
+    use_container_width=True,
+    key="html_report_download"
+)
+
 
 
 def benchmark_health_rows(years=4):
