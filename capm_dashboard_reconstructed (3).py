@@ -2092,11 +2092,10 @@ def page_compare():
             yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
         )
         st.plotly_chart(fig3, use_container_width=True)
-      # --- HTML Report Export ---
-        section("Export Comparison Report")
+# --- HTML Report Export ---
+    section("Export Comparison Report")
 
-        def build_html_report(results, benchmark_choice, years, frequency, rf_annual):
-            date_str = datetime.now().strftime("%d %B %Y")
+    date_str = datetime.now().strftime("%d %B %Y")
     
     # Table rows generate karo
     table_rows = ""
@@ -2290,83 +2289,24 @@ def page_compare():
   </div>
 </div>
 
-# ... (upar ka html_content wala part same rahega) ...
-        <div class="footer">
-          <div class="footer-note">
-            <strong>Methodology:</strong> CAPM framework · Benchmark: {benchmark_choice} · {years}-year {frequency.lower()} return data · 
-            Risk-free rate: {pct(rf_annual)} · Alpha = Jensen's Alpha · Verdicts based on composite score. · 
-            <em>Past performance is not a guarantee of future returns. Academic research purposes only.</em>
-          </div>
-          <div class="footer-brand">CAPM Research Workbench</div>
-        </div>
-        </body></html>"""
-    return html_content
+<div class="footer">
+  <div class="footer-note">
+    <strong>Methodology:</strong> CAPM framework · Benchmark: {benchmark_choice} · {years}-year {frequency.lower()} return data · 
+    Risk-free rate: {pct(rf_annual)} · Alpha = Jensen's Alpha · Verdicts based on composite score. · 
+    <em>Past performance is not a guarantee of future returns. Academic research purposes only.</em>
+  </div>
+  <div class="footer-brand">CAPM Research Workbench</div>
+</div>
+</body></html>"""
 
-    # Yahan spacing theek karni hai! 4 spaces aage khiskana hai:
-    html_report = build_html_report(results, benchmark_choice, years, frequency, rf_annual)
     st.download_button(
         "📄 Export HTML Report",
-        data=html_report,
+        data=html_content,
         file_name=f"Fund_Comparison_Report_{datetime.now().strftime('%Y%m%d')}.html",
         mime="text/html",
         use_container_width=True,
         key="html_report_download"
     )
-
-
-def benchmark_health_rows(years=4):
-    end_date = pd.Timestamp.today().normalize()
-    start_date = end_date - timedelta(days=int(years * 365.25))
-    rows = []
-    for name, details in BENCHMARKS.items():
-        if name == "Auto by category":
-            continue
-        ticker = details["ticker"]
-        fallback = details.get("fallback", "")
-        primary = fetch_yahoo_series(ticker, start_date.strftime("%Y-%m-%d"), (end_date + timedelta(days=1)).strftime("%Y-%m-%d"))
-        used = primary
-        actual = ticker
-        status = "Working"
-        if primary.empty and fallback:
-            fallback_series = fetch_yahoo_series(fallback, start_date.strftime("%Y-%m-%d"), (end_date + timedelta(days=1)).strftime("%Y-%m-%d"))
-            used = fallback_series
-            actual = fallback
-            status = "Fallback used" if not fallback_series.empty else "Unavailable"
-        elif primary.empty:
-            status = "Unavailable"
-
-        if used.empty:
-            rows.append(
-                {
-                    "Benchmark": name,
-                    "Primary Ticker": ticker,
-                    "Fallback": fallback or "-",
-                    "Actual Used": "-",
-                    "Status": status,
-                    "Observations": 0,
-                    "Start": "-",
-                    "End": "-",
-                    "Last Price": "N/A",
-                    "CAGR": "N/A",
-                }
-            )
-            continue
-
-        rows.append(
-            {
-                "Benchmark": name,
-                "Primary Ticker": ticker,
-                "Fallback": fallback or "-",
-                "Actual Used": actual,
-                "Status": status,
-                "Observations": len(used),
-                "Start": used.index[0].strftime("%d %b %Y"),
-                "End": used.index[-1].strftime("%d %b %Y"),
-                "Last Price": num(used.iloc[-1], 2),
-                "CAGR": pct(cagr(used)),
-            }
-        )
-    return rows
 
 
 def page_benchmark_health():
