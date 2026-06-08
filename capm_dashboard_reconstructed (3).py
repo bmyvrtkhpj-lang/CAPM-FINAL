@@ -2349,6 +2349,38 @@ def benchmark_health_rows(years):
         
     return rows
 
+def page_benchmark_health():
+    st.markdown(
+        "<div class='page-note'>Check which benchmark tickers are working from Yahoo Finance on the current deployment. If a primary ticker fails, the app shows whether fallback data is being used.</div>",
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        years = st.select_slider("Health check period", options=[1, 2, 3, 4, 5, 7, 10], value=4)
+    run = st.button("Run Benchmark Health Check", use_container_width=True)
+    
+    if not run and "benchmark_health_rows" not in st.session_state:
+        return
+        
+    if run:
+        with st.spinner("Checking benchmark data availability..."):
+            st.session_state["benchmark_health_rows"] = benchmark_health_rows(years)
+            
+    rows = st.session_state.get("benchmark_health_rows", [])
+    if not rows:
+        st.info("No benchmark status is available yet.")
+        return
+
+    df = pd.DataFrame(rows)
+    ok = int((df["Status"] == "Working").sum())
+    fallback = int((df["Status"] == "Fallback used").sum())
+    unavailable = int((df["Status"] == "Unavailable").sum())
+    a, b, c = st.columns(3)
+    a.markdown(metric_card("Working", str(ok), "Primary ticker available", "good"), unsafe_allow_html=True)
+    b.markdown(metric_card("Fallback", str(fallback), "Primary failed, fallback used", "warn"), unsafe_allow_html=True)
+    c.markdown(metric_card("Unavailable", str(unavailable), "No usable data returned", "bad" if unavailable else "good"), unsafe_allow_html=True)
+    st.dataframe(df, use_container_width=True, hide_index=True)    
+
 
 def scenario_projection(current, monthly_sip, annual_rate, years):
     months = int(years * 12)
