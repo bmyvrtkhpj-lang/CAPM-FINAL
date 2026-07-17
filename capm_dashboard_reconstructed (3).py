@@ -3,6 +3,8 @@ CAPM Mutual Fund Research Workbench
 
 Install:
   pip install streamlit pandas numpy yfinance mftool plotly openpyxl
+  # optional, gives exact t-distribution p-values on the Fama-French tab (falls back to a normal-approx otherwise):
+  pip install scipy
 
 Run:
   streamlit run capm_dashboard_reconstructed.py
@@ -27,12 +29,17 @@ try:
 except ImportError:
     go = None
 
+try:
+    from scipy import stats as scipy_stats
+except ImportError:
+    scipy_stats = None
+
 warnings.filterwarnings("ignore")
 os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
 
 
 APP_TITLE = "CAPM Mutual Fund Research Workbench"
-PAGES = ["Analyze Fund", "Compare Funds", "Benchmark Health", "Forecast Planner", "Report Builder", "Formula Audit"]
+PAGES = ["Analyze Fund", "Compare Funds", "Fama-French", "Benchmark Health", "Forecast Planner", "Report Builder", "Formula Audit"]
 
 PLOT_BG = "#FFFFFF"
 PAGE_BG = "#F6F8FB"
@@ -81,6 +88,22 @@ CATEGORY_KEYWORDS = {
     "Hybrid": ["hybrid", "balanced advantage", "aggressive hybrid"],
     "Index": ["index", "nifty 50", "sensex"],
 }
+
+# Fama-French and Momentum Factors: Data Library for the Indian Market, maintained by the
+# Indian Institute of Management, Ahmedabad (IIMA). See:
+# https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/
+IIMA_FACTOR_BASE_URL = "https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/DATA"
+IIMA_DEFAULT_RELEASE = "2025-12"
+IIMA_FACTOR_LABELS = {
+    "MF": "Market (Rm - Rf)",
+    "SMB": "SMB (Size)",
+    "HML": "HML (Value)",
+    "WML": "WML (Momentum)",
+}
+IIMA_CITATION = (
+    "Agarwalla, S. K., Jacob, J. and Varma, J. R. (2013), \"Four factor model in Indian equities "
+    "market\", Working Paper W.P. No. 2013-09-05, Indian Institute of Management, Ahmedabad."
+)
 
 
 st.set_page_config(page_title="CAPM Research", page_icon=":chart_with_upwards_trend:", layout="wide")
@@ -616,7 +639,7 @@ def render_header():
 <div class="topbar">
   <div>
     <div class="brand-title">{APP_TITLE}</div>
-    <div class="brand-sub">Excel-style CAPM calculations, clean fund comparison, scenario forecasting, and premium workbook export. No AI, no unreliable allocation estimates.</div>
+    <div class="brand-sub">Excel-style CAPM calculations, IIM Ahmedabad Fama-French factor regression, clean fund comparison, scenario forecasting, and premium workbook export. No AI, no unreliable allocation estimates.</div>
   </div>
   <div class="status-pill">Formula mode: Excel aligned</div>
 </div>
@@ -2503,12 +2526,529 @@ def page_formula_audit():
     )
 
 
+
+# ============================================================================
+# FAMA-FRENCH (IIM AHMEDABAD FACTOR DATA) MODULE
+# ============================================================================
+# Data source: Fama French and Momentum Factors: Data Library for Indian Market,
+# maintained by Prof. Sobhesh K. Agarwalla, Prof. Joshy Jacob and Prof. Jayanth R.
+# Varma at the Indian Institute of Management, Ahmedabad (IIMA).
+# https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/
+#
+# The library publishes daily/monthly/yearly CSVs named:
+#   {release}_FourFactors_and_Market_Returns_{Daily|Monthly}_SurvivorshipBiasAdjusted.csv
+# with columns: Date, SMB, HML, WML, MF, RF (all in percent; MF is the market
+# premium Rm-Rf, not the raw market return). Releases are tagged by month
+# (e.g. "2025-12") and refreshed a few times a year, so the release tag is
+# exposed as a text input on the page rather than hardcoded permanently.
+
+
+@st.cache_data(show_spinner=False, ttl=24 * 3600)
+def fetch_iima_factor_data(frequency, release=IIMA_DEFAULT_RELEASE):
+    filename = f"{release}_FourFactors_and_Market_Returns_{frequency}_SurvivorshipBiasAdjusted.csv"
+    url = f"{IIMA_FACTOR_BASE_URL}/{filename}"
+    try:
+        raw = pd.read_csv(url, na_values=["NA"])
+    except Exception:
+        return pd.DataFrame(), url, f"Could not load release '{release}' from IIM Ahmedabad."
+
+    raw.columns = [str(c).strip() for c in raw.columns]
+    date_fmt = "%Y-%m-%d" if frequency == "Daily" else "%Y-%m"
+    raw["Date"] = pd.to_datetime(raw["Date"], format=date_fmt, errors="coerce")
+    if frequency == "Monthly":
+        raw["Date"] = raw["Date"] + pd.offsets.MonthEnd(0)
+    raw = raw.dropna(subset=["Date"]).sort_values("Date").set_index("Date")
+
+    factor_cols = ["MF", "SMB", "HML", "WML", "RF"]
+    for col in factor_cols:
+        if col in raw.columns:
+            raw[col] = pd.to_numeric(raw[col], errors="coerce") / 100.0
+        else:
+            raw[col] = np.nan
+    return raw[factor_cols], url, None
+
+
+def read_uploaded_factor_file(uploaded_file):
+    if uploaded_file is None:
+        return pd.DataFrame(), None
+    try:
+        if uploaded_file.name.lower().endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+        df.columns = [str(c).strip() for c in df.columns]
+        date_col = next((c for c in df.columns if str(c).lower() in ["date", "month", "period"]), df.columns[0])
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=[date_col]).set_index(date_col).sort_index()
+
+        rename_map = {}
+        for c in df.columns:
+            cl = str(c).strip().lower()
+            if cl in ["mf", "mkt-rf", "mkt_rf", "market", "rm-rf", "rm_rf"]:
+                rename_map[c] = "MF"
+            elif cl in ["smb", "size"]:
+                rename_map[c] = "SMB"
+            elif cl in ["hml", "value"]:
+                rename_map[c] = "HML"
+            elif cl in ["wml", "mom", "momentum"]:
+                rename_map[c] = "WML"
+            elif cl in ["rf", "risk free", "risk-free", "riskfree"]:
+                rename_map[c] = "RF"
+        df = df.rename(columns=rename_map)
+
+        for col in ["MF", "SMB", "HML", "WML", "RF"]:
+            if col not in df.columns:
+                df[col] = np.nan
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+                # Auto-detect percent-scale vs decimal-scale factor values.
+                if df[col].abs().median(skipna=True) > 1:
+                    df[col] = df[col] / 100.0
+        return df[["MF", "SMB", "HML", "WML", "RF"]], "Uploaded factor file"
+    except Exception:
+        return pd.DataFrame(), None
+
+
+def multi_factor_regression(y, x_frame):
+    x_mat = np.column_stack([np.ones(len(x_frame))] + [x_frame[c].values for c in x_frame.columns])
+    y_vec = y.values.astype(float)
+    coeffs, _, _, _ = np.linalg.lstsq(x_mat, y_vec, rcond=None)
+    fitted = x_mat @ coeffs
+    resid = y_vec - fitted
+    n, k = x_mat.shape
+    dof = max(n - k, 1)
+    mse = float(np.sum(resid**2) / dof)
+    xtx_inv = np.linalg.pinv(x_mat.T @ x_mat)
+    se = np.sqrt(np.clip(np.diag(xtx_inv) * mse, 0, None))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_stats = np.where(se > 0, coeffs / se, np.nan)
+    if scipy_stats is not None:
+        p_values = 2 * scipy_stats.t.sf(np.abs(t_stats), dof)
+    else:
+        from math import erf, sqrt as msqrt
+        p_values = np.array(
+            [2 * (1 - 0.5 * (1 + erf(abs(t) / msqrt(2)))) if not np.isnan(t) else np.nan for t in t_stats]
+        )
+    ss_res = float(np.sum(resid**2))
+    ss_tot = float(np.sum((y_vec - y_vec.mean()) ** 2))
+    r_sq = 1 - ss_res / ss_tot if ss_tot else np.nan
+    adj_r_sq = 1 - (1 - r_sq) * (n - 1) / dof if dof > 0 and pd.notna(r_sq) else np.nan
+    return {
+        "coeffs": coeffs, "se": se, "t_stats": t_stats, "p_values": p_values,
+        "r_sq": r_sq, "adj_r_sq": adj_r_sq, "resid": resid, "fitted": fitted,
+        "n": n, "dof": dof,
+    }
+
+
+def run_fama_french_analysis(scheme_code, fund_name, category, years, frequency, factor_df, factor_source,
+                              rf_mode="iima", custom_rf_annual=0.065, include_momentum=True):
+    as_of = pd.Timestamp.today().normalize()
+    start_date = as_of - timedelta(days=int(years * 365.25))
+    periods, _ = periods_per_year(frequency)
+
+    fund_all = fetch_fund_nav(str(scheme_code))
+    if fund_all.empty:
+        return None, "No AMFI NAV history was found for this fund."
+
+    fund_prices = fund_all[(fund_all.index >= start_date) & (fund_all.index <= as_of)]
+    min_obs = 45 if frequency == "Daily" else 12
+    if len(fund_prices) < min_obs:
+        return None, "Not enough NAV observations for the selected period."
+
+    if factor_df is None or factor_df.empty:
+        return None, "Fama-French factor data is unavailable. Check the release tag or upload a factor file."
+
+    if frequency == "Monthly":
+        fund_prices = fund_prices.resample("ME").last().dropna()
+    fund_ret = fund_prices.pct_change().dropna()
+    fund_ret.name = "fund_return"
+
+    merged = pd.concat([fund_ret, factor_df], axis=1, join="inner").dropna()
+    if len(merged) < min_obs:
+        return None, (
+            f"Only {len(merged)} matched {frequency.lower()} observations against the factor data. "
+            "Try a longer period, a different frequency, or check the release tag."
+        )
+
+    if rf_mode == "iima":
+        rf_series = merged["RF"]
+    else:
+        rf_series = pd.Series(float(custom_rf_annual) / periods, index=merged.index)
+
+    y = merged["fund_return"] - rf_series
+    factor_cols = ["MF", "SMB", "HML", "WML"] if include_momentum else ["MF", "SMB", "HML"]
+    x_frame = merged[factor_cols]
+
+    reg = multi_factor_regression(y, x_frame)
+
+    fund_return_ann = float(merged["fund_return"].mean()) * periods
+    rf_annual_avg = float(rf_series.mean()) * periods
+    alpha_period = float(reg["coeffs"][0])
+    alpha_annual = alpha_period * periods
+
+    factor_means_ann = {c: float(merged[c].mean()) * periods for c in factor_cols}
+    loadings = {c: float(reg["coeffs"][idx + 1]) for idx, c in enumerate(factor_cols)}
+    contributions = {c: loadings[c] * factor_means_ann[c] for c in factor_cols}
+    residual_ann = fund_return_ann - rf_annual_avg - alpha_annual - sum(contributions.values())
+
+    result = {
+        "fund_name": fund_name,
+        "scheme_code": str(scheme_code),
+        "category": category,
+        "frequency": frequency,
+        "periods_per_year": periods,
+        "period_years_requested": years,
+        "factor_source": factor_source,
+        "rf_mode": rf_mode,
+        "include_momentum": include_momentum,
+        "factor_cols": factor_cols,
+        "merged": merged,
+        "n_obs": len(merged),
+        "start_date": merged.index[0],
+        "end_date": merged.index[-1],
+        "fund_return_ann": fund_return_ann,
+        "rf_annual_avg": rf_annual_avg,
+        "alpha_period": alpha_period,
+        "alpha_annual": alpha_annual,
+        "loadings": loadings,
+        "se": {c: float(reg["se"][idx + 1]) for idx, c in enumerate(factor_cols)},
+        "t_stats": {c: float(reg["t_stats"][idx + 1]) for idx, c in enumerate(factor_cols)},
+        "p_values": {c: float(reg["p_values"][idx + 1]) for idx, c in enumerate(factor_cols)},
+        "alpha_se": float(reg["se"][0]),
+        "alpha_t": float(reg["t_stats"][0]),
+        "alpha_p": float(reg["p_values"][0]),
+        "factor_means_ann": factor_means_ann,
+        "contributions": contributions,
+        "residual_ann": residual_ann,
+        "r_sq": reg["r_sq"],
+        "adj_r_sq": reg["adj_r_sq"],
+        "dof": reg["dof"],
+        "resid": reg["resid"],
+        "fitted": reg["fitted"],
+    }
+    return result, None
+
+
+def fama_french_interpretation(r):
+    notes = []
+    alpha_sig = pd.notna(r["alpha_p"]) and r["alpha_p"] < 0.05
+    if alpha_sig and r["alpha_annual"] > 0:
+        notes.append(f"Alpha is positive and statistically significant ({pct(r['alpha_annual'])}/yr) — outperformance versus the factor model.")
+    elif alpha_sig and r["alpha_annual"] < 0:
+        notes.append(f"Alpha is negative and statistically significant ({pct(r['alpha_annual'])}/yr) — underperformance versus the factor model.")
+    else:
+        notes.append("Alpha is not statistically distinguishable from zero at the 5% level — performance is largely explained by factor exposure, not standalone skill.")
+
+    if "SMB" in r["loadings"]:
+        smb, smb_p = r["loadings"]["SMB"], r["p_values"]["SMB"]
+        sig = pd.notna(smb_p) and smb_p < 0.05
+        if sig and smb > 0.1:
+            notes.append("Significant positive SMB loading — meaningful small-cap tilt.")
+        elif sig and smb < -0.1:
+            notes.append("Significant negative SMB loading — meaningful large-cap tilt.")
+        else:
+            notes.append("No strong, statistically significant size tilt detected.")
+
+    if "HML" in r["loadings"]:
+        hml, hml_p = r["loadings"]["HML"], r["p_values"]["HML"]
+        sig = pd.notna(hml_p) and hml_p < 0.05
+        if sig and hml > 0.1:
+            notes.append("Significant positive HML loading — value tilt.")
+        elif sig and hml < -0.1:
+            notes.append("Significant negative HML loading — growth tilt.")
+        else:
+            notes.append("No strong, statistically significant value/growth tilt detected.")
+
+    if "WML" in r["loadings"]:
+        wml, wml_p = r["loadings"]["WML"], r["p_values"]["WML"]
+        sig = pd.notna(wml_p) and wml_p < 0.05
+        if sig and wml > 0.1:
+            notes.append("Significant positive WML loading — the fund behaves like a momentum-follower.")
+        elif sig and wml < -0.1:
+            notes.append("Significant negative WML loading — the fund behaves like a contrarian/reversal strategy.")
+        else:
+            notes.append("No strong, statistically significant momentum tilt detected.")
+
+    mkt = r["loadings"].get("MF", np.nan)
+    if pd.notna(mkt):
+        if mkt > 1.1:
+            notes.append(f"Market loading of {num(mkt, 2)} is aggressive versus the broad market factor.")
+        elif mkt < 0.9:
+            notes.append(f"Market loading of {num(mkt, 2)} is defensive versus the broad market factor.")
+        else:
+            notes.append(f"Market loading of {num(mkt, 2)} is close to market-like.")
+    return notes[:6]
+
+
+def chart_factor_loadings(r):
+    go = plotly_go()
+    if go is None:
+        return
+    labels = [IIMA_FACTOR_LABELS[c] for c in r["factor_cols"]]
+    values = [r["loadings"][c] for c in r["factor_cols"]]
+    colors = [TEAL if v >= 0 else RED for v in values]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=labels, y=values, marker_color=colors, text=[num(v, 2) for v in values], textposition="outside"))
+    fig.add_hline(y=0, line_dash="dot", line_color="#98A2B3")
+    fig.update_layout(
+        title="Factor Loadings (Betas)",
+        paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=340,
+        margin=dict(l=10, r=10, t=45, b=10),
+        xaxis=dict(color=MUTED), yaxis=dict(title="Loading", gridcolor=GRID, color=MUTED),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def chart_factor_attribution(r):
+    go = plotly_go()
+    if go is None:
+        return
+    labels = ["Risk-free", "Alpha"] + [IIMA_FACTOR_LABELS[c] for c in r["factor_cols"]] + ["Residual/Other"]
+    values = [r["rf_annual_avg"], r["alpha_annual"]] + [r["contributions"][c] for c in r["factor_cols"]] + [r["residual_ann"]]
+    colors = [MUTED, GOLD] + [TEAL if r["contributions"][c] >= 0 else RED for c in r["factor_cols"]] + ["#98A2B3"]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=labels, y=[v * 100 for v in values], marker_color=colors, text=[pct(v) for v in values], textposition="outside"))
+    fig.add_hline(y=0, line_dash="dot", line_color="#98A2B3")
+    fig.update_layout(
+        title="Annualized Return Attribution",
+        paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=360,
+        margin=dict(l=10, r=10, t=45, b=10),
+        xaxis=dict(color=MUTED, tickangle=-20),
+        yaxis=dict(title="Contribution (%)", gridcolor=GRID, color=MUTED, ticksuffix="%"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def chart_ff_cumulative(r):
+    go = plotly_go()
+    if go is None:
+        return
+    merged = r["merged"]
+    if r["rf_mode"] == "iima":
+        rf_series = merged["RF"]
+    else:
+        rf_series = pd.Series(r["rf_annual_avg"] / r["periods_per_year"], index=merged.index)
+    actual_excess = (merged["fund_return"] - rf_series).cumsum()
+    fitted_excess = pd.Series(r["fitted"], index=merged.index).cumsum()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=actual_excess.index, y=actual_excess.values * 100, name="Actual excess return (cum.)", line=dict(color=TEAL, width=2.4)))
+    fig.add_trace(go.Scatter(x=fitted_excess.index, y=fitted_excess.values * 100, name="Factor-model fitted (cum.)", line=dict(color=BLUE, width=2, dash="dash")))
+    fig.update_layout(
+        title="Actual vs Factor-Model Fitted Cumulative Excess Return",
+        paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=350,
+        margin=dict(l=10, r=10, t=45, b=10),
+        xaxis=dict(gridcolor=GRID, color=MUTED),
+        yaxis=dict(title="Cumulative excess return (%)", gridcolor=GRID, color=MUTED),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_fama_french_inputs():
+    section("Fama-French Analysis Setup")
+    fund = search_fund_widget("ff", "Search fund")
+    a, b, c = st.columns(3)
+    with a:
+        years = st.select_slider("Period", options=[1, 2, 3, 4, 5, 7, 10], value=4, key="ff_years")
+    with b:
+        frequency = st.radio("Return frequency", ["Daily", "Monthly"], horizontal=True, key="ff_freq")
+    with c:
+        include_momentum = st.checkbox("Include Momentum (WML) factor", value=True, key="ff_momentum")
+    d, e = st.columns(2)
+    with d:
+        release = st.text_input(
+            "IIM Ahmedabad data release", value=IIMA_DEFAULT_RELEASE, key="ff_release",
+            help="Release tag used in the IIMA data library filenames, e.g. 2025-12. "
+                 "Update this when a newer release is published.",
+        )
+    with e:
+        rf_choice = st.radio(
+            "Risk-free rate source", ["IIM Ahmedabad RF (recommended)", "Custom annual rate"],
+            key="ff_rf_choice",
+        )
+    custom_rf = 0.065
+    if rf_choice == "Custom annual rate":
+        custom_rf = st.number_input("Custom risk-free rate (%)", min_value=0.0, max_value=15.0, value=6.5, step=0.1, key="ff_custom_rf") / 100
+    uploaded_factor = st.file_uploader(
+        "Optional: override with your own factor CSV/XLSX (Date, MF/Mkt-RF, SMB, HML, WML, RF columns)",
+        type=["csv", "xlsx", "xls"], key="ff_factor_upload",
+    )
+    run = st.button("Run Fama-French Analysis", use_container_width=True, key="ff_run")
+    return fund, years, frequency, include_momentum, release, rf_choice, custom_rf, uploaded_factor, run
+
+
+def render_fama_french_summary(r):
+    st.markdown(
+        f"""
+<div class="page-note">
+  <b>{esc(r['fund_name'])}</b> | Code {esc(r['scheme_code'])} | {category_label(r['category'])} |
+  Factor data: IIM Ahmedabad ({esc(r['factor_source'])}) |
+  {r['n_obs']} matched {r['frequency'].lower()} observations from {r['start_date'].strftime('%d %b %Y')} to {r['end_date'].strftime('%d %b %Y')}.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.markdown(metric_card("Annualized alpha", pct(r["alpha_annual"]), f"t-stat {num(r['alpha_t'], 2)}", signed_class(r["alpha_annual"])), unsafe_allow_html=True)
+    c2.markdown(metric_card("Market beta", num(r["loadings"].get("MF", np.nan), 2), "Loading on MF"), unsafe_allow_html=True)
+    c3.markdown(metric_card("R-squared", num(r["r_sq"], 3), f"Adj. {num(r['adj_r_sq'], 3)}"), unsafe_allow_html=True)
+    c4.markdown(metric_card("SMB loading", num(r["loadings"].get("SMB", np.nan), 2), "Size tilt", "good" if r["loadings"].get("SMB", 0) > 0 else "warn"), unsafe_allow_html=True)
+    c5.markdown(metric_card("HML loading", num(r["loadings"].get("HML", np.nan), 2), "Value tilt", "good" if r["loadings"].get("HML", 0) > 0 else "warn"), unsafe_allow_html=True)
+
+
+def render_fama_french_tabs(r):
+    overview, loadings_tab, attribution_tab, charts_tab, data_tab = st.tabs(
+        ["Overview", "Factor Loadings", "Return Attribution", "Charts", "Data"]
+    )
+    with overview:
+        a, b = st.columns(2)
+        with a:
+            st.markdown(
+                "<div class='panel'><div class='card-title'>Regression Summary</div>"
+                + row_html("Alpha (annualized)", pct(r["alpha_annual"]), signed_class(r["alpha_annual"]))
+                + row_html("Alpha t-stat", num(r["alpha_t"], 2))
+                + row_html("Alpha p-value", num(r["alpha_p"], 4))
+                + row_html("R-squared", num(r["r_sq"], 3))
+                + row_html("Adjusted R-squared", num(r["adj_r_sq"], 3))
+                + row_html("Degrees of freedom", str(r["dof"]))
+                + row_html("Risk-free source", "IIM Ahmedabad RF" if r["rf_mode"] == "iima" else "Custom annual rate")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+        with b:
+            st.markdown(
+                "<div class='panel'><div class='card-title'>Interpretation</div>"
+                + "".join(f"<div class='row'><span>{idx}</span><span>{esc(note)}</span></div>" for idx, note in enumerate(fama_french_interpretation(r), 1))
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+    with loadings_tab:
+        rows = [{
+            "Factor": "Alpha",
+            "Loading": r["alpha_period"],
+            "Std. Error": r["alpha_se"],
+            "t-stat": r["alpha_t"],
+            "p-value": r["alpha_p"],
+            "Significant (5%)": "Yes" if pd.notna(r["alpha_p"]) and r["alpha_p"] < 0.05 else "No",
+        }]
+        for c in r["factor_cols"]:
+            rows.append({
+                "Factor": IIMA_FACTOR_LABELS[c],
+                "Loading": r["loadings"][c],
+                "Std. Error": r["se"][c],
+                "t-stat": r["t_stats"][c],
+                "p-value": r["p_values"][c],
+                "Significant (5%)": "Yes" if pd.notna(r["p_values"][c]) and r["p_values"][c] < 0.05 else "No",
+            })
+        df_loadings = pd.DataFrame(rows)
+        display_loadings = df_loadings.copy()
+        for col in ["Loading", "Std. Error", "t-stat"]:
+            display_loadings[col] = display_loadings[col].apply(lambda x: num(x, 4))
+        display_loadings["p-value"] = display_loadings["p-value"].apply(lambda x: num(x, 4))
+        st.dataframe(display_loadings, use_container_width=True, hide_index=True)
+        chart_factor_loadings(r)
+    with attribution_tab:
+        st.caption(
+            "Approximate decomposition of the fund's annualized return into the risk-free rate, alpha, "
+            "each factor's contribution (loading x that factor's own annualized return), and residual/unexplained return."
+        )
+        chart_factor_attribution(r)
+        attr_rows = [
+            {"Component": "Risk-free rate", "Annualized": r["rf_annual_avg"]},
+            {"Component": "Alpha", "Annualized": r["alpha_annual"]},
+        ]
+        for c in r["factor_cols"]:
+            attr_rows.append({"Component": IIMA_FACTOR_LABELS[c], "Annualized": r["contributions"][c]})
+        attr_rows.append({"Component": "Residual/Other", "Annualized": r["residual_ann"]})
+        attr_rows.append({"Component": "Total (check vs fund return)", "Annualized": r["fund_return_ann"]})
+        df_attr = pd.DataFrame(attr_rows)
+        df_attr["Annualized"] = df_attr["Annualized"].apply(pct)
+        st.dataframe(df_attr, use_container_width=True, hide_index=True)
+    with charts_tab:
+        chart_ff_cumulative(r)
+    with data_tab:
+        table = r["merged"].copy()
+        table.insert(0, "Date", table.index)
+        display_cols = ["Date", "fund_return", "MF", "SMB", "HML", "WML", "RF"]
+        display_cols = [c for c in display_cols if c in table.columns]
+        display = table[display_cols].copy()
+        for col in display_cols[1:]:
+            display[col] = display[col].apply(pct)
+        display["Date"] = display["Date"].dt.strftime("%Y-%m-%d")
+        st.dataframe(display.tail(500), use_container_width=True, hide_index=True)
+        st.markdown(
+            f"<div class='page-note'>Data source: Fama-French and Momentum Factors Data Library, Indian "
+            f"Institute of Management Ahmedabad (Agarwalla, Jacob &amp; Varma, 2013). {esc(r['factor_source'])}</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def page_fama_french():
+    st.markdown(
+        "<div class='page-note'>Runs a Fama-French (3-factor) plus Momentum regression on the fund's excess "
+        "returns using the Fama-French and Momentum Factors Data Library maintained by the Indian Institute of "
+        "Management, Ahmedabad (IIMA). Alpha here is the intercept after controlling for Market, Size (SMB), "
+        "Value (HML) and Momentum (WML) — a stricter skill test than the single-factor CAPM alpha.</div>",
+        unsafe_allow_html=True,
+    )
+    fund, years, frequency, include_momentum, release, rf_choice, custom_rf, uploaded_factor, run = render_fama_french_inputs()
+    rf_mode = "iima" if rf_choice.startswith("IIM Ahmedabad") else "custom"
+
+    if run:
+        if not fund:
+            st.warning("Please select a fund before running the analysis.")
+            return
+        uploaded_df, uploaded_label = read_uploaded_factor_file(uploaded_factor)
+        if not uploaded_df.empty:
+            factor_df, factor_source = uploaded_df, uploaded_label
+        else:
+            with st.spinner("Fetching IIM Ahmedabad factor data..."):
+                factor_df, factor_url, factor_err = fetch_iima_factor_data(frequency, release.strip() or IIMA_DEFAULT_RELEASE)
+            if factor_err or factor_df.empty:
+                st.error(
+                    f"Could not fetch factor data for release '{release}'. Try a different release tag "
+                    "(check https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/ for the latest one) "
+                    "or upload a factor file."
+                )
+                return
+            factor_source = f"Release {release}"
+        with st.spinner("Running Fama-French regression..."):
+            result, err = run_fama_french_analysis(
+                fund["code"], fund["name"], fund["category"], years, frequency,
+                factor_df, factor_source, rf_mode, custom_rf, include_momentum,
+            )
+        if err:
+            st.error(err)
+            return
+        st.session_state["last_ff_analysis"] = result
+
+    r = st.session_state.get("last_ff_analysis")
+    if not r:
+        return
+    section("Fama-French Result")
+    render_fama_french_summary(r)
+    render_fama_french_tabs(r)
+    section("About the Data")
+    st.markdown(
+        "<div class='panel'><div class='card-title'>Fama-French and Momentum Factors: Data Library for Indian Market</div>"
+        + row_html("Maintained by", "Indian Institute of Management, Ahmedabad (Profs. Sobhesh K. Agarwalla, Joshy Jacob, Jayanth R. Varma)")
+        + row_html("Underlying data", "CMIE Prowess DX, BSE and NSE listed companies, survivorship-bias adjusted")
+        + row_html("Citation", IIMA_CITATION)
+        + row_html("Source", "https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def main():
     page = render_header()
     if page == "Analyze Fund":
         page_analyze()
     elif page == "Compare Funds":
         page_compare()
+    elif page == "Fama-French":
+        page_fama_french()
     elif page == "Benchmark Health":
         page_benchmark_health()
     elif page == "Forecast Planner":
