@@ -1427,6 +1427,7 @@ def render_result_tabs(r):
         # --- EMA Calculation on Benchmark ---
         bench_daily = r["prices"]["benchmark"].copy()
         ema_200 = bench_daily.ewm(span=200, adjust=False).mean()
+        ema_50 = bench_daily.ewm(span=50, adjust=False).mean()
         
         phase_series = pd.Series(
             np.where(bench_daily >= ema_200, "Bull", "Bear"),
@@ -1574,11 +1575,15 @@ def render_result_tabs(r):
                     name=r["benchmark_label"], line=dict(color=BLUE, width=1.8)
                 ))
                 fig2.add_trace(go.Scatter(
+                    x=ema_50.dropna().index, y=ema_50.dropna().values,
+                    name="50-day EMA", line=dict(color=GREEN, width=1.8, dash="dot")
+                ))
+                fig2.add_trace(go.Scatter(
                     x=ema_200.dropna().index, y=ema_200.dropna().values,
                     name="200-day EMA", line=dict(color=ORANGE, width=2, dash="dash")
                 ))
                 fig2.update_layout(
-                    title="Benchmark Price vs 200-day EMA",
+                    title="Benchmark Price vs 50-day & 200-day EMA",
                     paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=320,
                     margin=dict(l=10, r=10, t=45, b=48),
                     xaxis=dict(gridcolor=GRID, color=MUTED),
