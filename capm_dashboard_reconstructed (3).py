@@ -2570,10 +2570,29 @@ def fetch_latest_iima_release():
 def fetch_iima_factor_data(frequency, release=IIMA_DEFAULT_RELEASE):
     filename = f"{release}_FourFactors_and_Market_Returns_{frequency}_SurvivorshipBiasAdjusted.csv"
     url = f"{IIMA_FACTOR_BASE_URL}/{filename}"
+    raw_bytes = None
+    last_err = None
     try:
-        raw = pd.read_csv(url, na_values=["NA"])
-    except Exception:
-        return pd.DataFrame(), url, f"Could not load release '{release}' from IIM Ahmedabad."
+        # Some institutional servers reject requests with no/blank User-Agent, so fetch
+        # with a normal browser header first (this is what actually fixes most "no data" cases).
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw_bytes = resp.read()
+    except Exception as e:
+        last_err = e
+        try:
+            # Fallback: let pandas fetch it directly, in case the custom header was the problem instead.
+            raw = pd.read_csv(url, na_values=["NA"])
+            raw_bytes = None
+        except Exception as e2:
+            last_err = e2
+            return pd.DataFrame(), url, f"{type(e2).__name__}: {e2}"
+
+    try:
+        if raw_bytes is not None:
+            raw = pd.read_csv(io.BytesIO(raw_bytes), na_values=["NA"])
+    except Exception as e:
+        return pd.DataFrame(), url, f"{type(e).__name__}: {e}"
 
     raw.columns = [str(c).strip() for c in raw.columns]
     date_fmt = "%Y-%m-%d" if frequency == "Daily" else "%Y-%m"
@@ -3068,9 +3087,13 @@ def page_fama_french():
                 factor_df, factor_url, factor_err = fetch_iima_factor_data(frequency, release)
             if factor_err or factor_df.empty:
                 st.error(
-                    f"Could not fetch factor data for release '{release}'. Try 'Manual release tag' with a "
-                    "different tag (check https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/ for the "
-                    "latest one) or upload a factor file."
+                    f"Could not fetch factor data for release '{release}' from {factor_url}.\n\n"
+                    f"Details: {factor_err or 'file returned no rows'}\n\n"
+                    "This is usually either (a) that release tag doesn't exist yet for this frequency, "
+                    "(b) your network/firewall is blocking faculty.iima.ac.in, or (c) the site is "
+                    "temporarily down. Try 'Manual release tag' with a different tag (check "
+                    "https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/ for valid ones), or "
+                    "upload your own factor file below."
                 )
                 return
             factor_source = f"Release {release}"
