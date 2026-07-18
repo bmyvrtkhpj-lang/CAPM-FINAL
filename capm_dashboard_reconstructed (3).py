@@ -622,11 +622,33 @@ def search_fund_widget(key_prefix, label="Fund", direct_growth_default=True):
         st.info("No matching fund found for this filter.")
         return None
 
-    options = ["Type to search and select a fund"] + [f"{row.name} | {row.code}" for row in filtered.itertuples(index=False)]
     with c1:
-        pick = st.selectbox(label, options, key=f"{key_prefix}_select")
-    if pick == "Type to search and select a fund":
+        query = st.text_input(
+            label, key=f"{key_prefix}_query",
+            placeholder="Type a fund name, e.g. Parag Parikh Flexi Cap",
+        )
+
+    query = (query or "").strip()
+    if not query:
+        st.caption("Start typing to search across AMFI schemes.")
         return None
+
+    terms = [t for t in re.split(r"\s+", query.lower()) if t]
+    mask = pd.Series(True, index=filtered.index)
+    for t in terms:
+        mask &= filtered["name_lower"].str.contains(re.escape(t), na=False)
+    matches = filtered[mask]
+
+    if matches.empty:
+        st.info("No matching fund found. Try fewer words or a different spelling.")
+        return None
+
+    matches = matches.head(60)
+    options = [f"{row.name} | {row.code}" for row in matches.itertuples(index=False)]
+    pick = st.selectbox(
+        f"{len(matches)} match{'es' if len(matches) != 1 else ''} — pick one",
+        options, key=f"{key_prefix}_select",
+    )
 
     name, code = pick.rsplit("|", 1)
     name = name.strip()
@@ -640,9 +662,8 @@ def render_header():
 <div class="topbar">
   <div>
     <div class="brand-title">{APP_TITLE}</div>
-    <div class="brand-sub">Excel-style CAPM calculations, IIM Ahmedabad Fama-French factor regression, clean fund comparison, scenario forecasting, and premium workbook export. No AI, no unreliable allocation estimates.</div>
+    <div class="brand-sub">CAPM calculations, IIM Ahmedabad Fama-French factor regression, clean fund comparison, scenario forecasting, and premium workbook export.</div>
   </div>
-  <div class="status-pill">Formula mode: Excel aligned</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -658,7 +679,7 @@ def render_analysis_inputs():
     with a:
         benchmark_choice = st.selectbox("Benchmark", list(BENCHMARKS.keys()), index=0)
     with b:
-        years = st.select_slider("Period", options=[1, 2, 3, 4, 5, 7, 10], value=4)
+        years = st.select_slider("Period (in years)", options=[1, 2, 3, 4, 5, 7, 10], value=4)
     with c:
         frequency = st.radio("Return frequency", ["Daily", "Monthly"], horizontal=True)
     with d:
@@ -680,10 +701,10 @@ def chart_growth(r):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=355,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(gridcolor=GRID, color=MUTED),
         yaxis=dict(gridcolor=GRID, color=MUTED, tickprefix="INR "),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -701,10 +722,10 @@ def chart_drawdown(r):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=325,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(gridcolor=GRID, color=MUTED),
         yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -723,10 +744,10 @@ def chart_rolling(r):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=325,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(gridcolor=GRID, color=MUTED),
         yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -747,11 +768,11 @@ def chart_rolling_capm(r):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=340,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(gridcolor=GRID, color=MUTED),
         yaxis=dict(title="Beta", gridcolor=GRID, color=MUTED),
         yaxis2=dict(title="Alpha (%)", overlaying="y", side="right", gridcolor=GRID, color=MUTED),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -769,10 +790,10 @@ def chart_sip_backtest(df):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=330,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(gridcolor=GRID, color=MUTED),
         yaxis=dict(gridcolor=GRID, color=MUTED, tickprefix="INR "),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -797,10 +818,10 @@ def chart_capm_scatter(r):
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=325,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(title="Benchmark return (%)", gridcolor=GRID, color=MUTED),
         yaxis=dict(title="Fund return (%)", gridcolor=GRID, color=MUTED),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -1044,7 +1065,7 @@ def excel_validation_rows(r):
         rows.append(
             {
                 "Metric": metric,
-                "Excel-style Formula": formula,
+                "Formula": formula,
                 "Recomputed": check,
                 "App Value": app_value,
                 "Difference": diff,
@@ -1083,7 +1104,7 @@ def render_result_summary(r):
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.markdown(metric_card("Excel-style annual return", pct(r["fund_return_ann"]), f"Benchmark {pct(r['benchmark_return_ann'])}", signed_class(r["fund_return_ann"])), unsafe_allow_html=True)
+    c1.markdown(metric_card("Annual return", pct(r["fund_return_ann"]), f"Benchmark {pct(r['benchmark_return_ann'])}", signed_class(r["fund_return_ann"])), unsafe_allow_html=True)
     c2.markdown(metric_card("Jensen alpha", pct(r["alpha"]), "Fund return minus CAPM expected", signed_class(r["alpha"])), unsafe_allow_html=True)
     c3.markdown(metric_card("Beta", num(r["beta"], 2), "Sensitivity to benchmark", "bad" if r["beta"] > 1.1 else "good" if r["beta"] < 0.9 else "warn"), unsafe_allow_html=True)
     c4.markdown(metric_card("Sharpe ratio", num(r["sharpe"], 2), "Excess return per unit risk", "good" if r["sharpe"] > 1 else "warn"), unsafe_allow_html=True)
@@ -1360,10 +1381,10 @@ def render_result_tabs(r):
             fig.update_layout(
                 title=f"Rolling {window} Return",
                 paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=340,
-                margin=dict(l=10, r=10, t=45, b=10),
+                margin=dict(l=10, r=10, t=45, b=48),
                 xaxis=dict(gridcolor=GRID, color=MUTED),
                 yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
                 hovermode="x unified",
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -1401,14 +1422,14 @@ def render_result_tabs(r):
             st.dataframe(roll_table.tail(24), use_container_width=True, hide_index=True)
     
     with bull_bear_tab:
-        st.caption("Bull and Bear phases identified using Nifty 50 200-day SMA. Price above SMA = Bull, below = Bear.")
+        st.caption("Bull and Bear phases identified using Nifty 50 200-day EMA. Price above EMA = Bull, below = Bear.")
         
-        # --- SMA Calculation on Benchmark ---
+        # --- EMA Calculation on Benchmark ---
         bench_daily = r["prices"]["benchmark"].copy()
-        sma_200 = bench_daily.rolling(200).mean()
+        ema_200 = bench_daily.ewm(span=200, adjust=False).mean()
         
         phase_series = pd.Series(
-            np.where(bench_daily >= sma_200, "Bull", "Bear"),
+            np.where(bench_daily >= ema_200, "Bull", "Bear"),
             index=bench_daily.index
         )
         
@@ -1425,7 +1446,7 @@ def render_result_tabs(r):
         ]
         
         # --- Mode Toggle ---
-        mode = st.radio("Phase detection mode", ["Fixed Historical", "Auto 200-SMA"], horizontal=True, key="bb_mode")
+        mode = st.radio("Phase detection mode", ["Fixed Historical", "Auto 200-EMA"], horizontal=True, key="bb_mode")
         
         # --- Fund Returns per Phase ---
         fund_prices = r["prices"]["fund"].copy()
@@ -1452,10 +1473,10 @@ def render_result_tabs(r):
                     "Outperformance": f_ret - b_ret,
                 })
         else:
-            # Auto SMA mode — group consecutive same-phase days
+            # Auto EMA mode — group consecutive same-phase days
             phase_df = pd.DataFrame({
                 "price": bench_daily,
-                "sma200": sma_200,
+                "ema200": ema_200,
                 "phase": phase_series
             }).dropna()
             
@@ -1476,7 +1497,7 @@ def render_result_tabs(r):
                 rows_bb.append({
                     "Phase": phase,
                     "Period": f"{s.strftime('%Y-%m-%d')} to {e.strftime('%Y-%m-%d')}",
-                    "Reason": "Auto 200-SMA detected",
+                    "Reason": "Auto 200-EMA detected",
                     "Fund Return": f_ret,
                     "Benchmark Return": b_ret,
                     "Outperformance": f_ret - b_ret,
@@ -1538,31 +1559,31 @@ def render_result_tabs(r):
                     title="Fund vs Benchmark — Bull & Bear Phases",
                     barmode="group",
                     paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=400,
-                    margin=dict(l=10, r=10, t=45, b=10),
+                    margin=dict(l=10, r=10, t=45, b=48),
                     xaxis=dict(gridcolor=GRID, color=MUTED, tickangle=-30),
                     yaxis=dict(gridcolor=GRID, color=MUTED, ticksuffix="%"),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                    legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
                     hovermode="x unified",
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # --- SMA Chart ---
+                # --- EMA Chart ---
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scatter(
                     x=bench_daily.index, y=bench_daily.values,
                     name=r["benchmark_label"], line=dict(color=BLUE, width=1.8)
                 ))
                 fig2.add_trace(go.Scatter(
-                    x=sma_200.dropna().index, y=sma_200.dropna().values,
-                    name="200-day SMA", line=dict(color=ORANGE, width=2, dash="dash")
+                    x=ema_200.dropna().index, y=ema_200.dropna().values,
+                    name="200-day EMA", line=dict(color=ORANGE, width=2, dash="dash")
                 ))
                 fig2.update_layout(
-                    title="Benchmark Price vs 200-day SMA",
+                    title="Benchmark Price vs 200-day EMA",
                     paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=320,
-                    margin=dict(l=10, r=10, t=45, b=10),
+                    margin=dict(l=10, r=10, t=45, b=48),
                     xaxis=dict(gridcolor=GRID, color=MUTED),
                     yaxis=dict(gridcolor=GRID, color=MUTED),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                    legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
                     hovermode="x unified",
                 )
                 st.plotly_chart(fig2, use_container_width=True)
@@ -1575,7 +1596,7 @@ def render_result_tabs(r):
             st.dataframe(display_bb, use_container_width=True, hide_index=True)
           
     with validation:
-        st.caption("Recomputes key values using Excel-equivalent formulas to verify the calculation backend.")
+        st.caption("Recomputes key values using the same formulas, independently, to verify the calculation backend.")
         val = pd.DataFrame(excel_validation_rows(r))
         display = val.copy()
         for col in ["Recomputed", "App Value", "Difference"]:
@@ -1703,7 +1724,7 @@ def build_report_workbook(r):
         ("Fund Score", f"{score['total']}/100", score["verdict"]),
         ("Risk Verdict", risk["level"], f"Suggested horizon: {risk['horizon']}"),
         ("Period", f"{r['start_date'].strftime('%d %b %Y')} to {r['end_date'].strftime('%d %b %Y')}", f"{r['n_obs']} {r['frequency'].lower()} observations"),
-        ("Excel-style annual return", pct(r["fund_return_ann"]), "Average periodic return annualized"),
+        ("Annual return", pct(r["fund_return_ann"]), "Average periodic return annualized"),
         ("Benchmark annual return", pct(r["benchmark_return_ann"]), "Same frequency and matched dates"),
         ("CAPM expected return", pct(r["capm_expected"]), "Rf + Beta x market premium"),
         ("Jensen alpha", pct(r["alpha"]), "Annual return minus CAPM expected"),
@@ -1791,7 +1812,7 @@ def build_report_workbook(r):
 
     audit = wb.create_sheet("Formula Audit")
     style_sheet(audit)
-    write_title(audit, "Formula Audit", "Excel-style formula reference")
+    write_title(audit, "Formula Audit", "Formula reference")
     formula_rows = formula_audit_rows(r["frequency"])
     for col, h in enumerate(["Metric", "Formula", "Notes"], 1):
         cell = audit.cell(4, col, h)
@@ -1813,15 +1834,15 @@ def build_report_workbook(r):
 
     validation = wb.create_sheet("Validation")
     style_sheet(validation)
-    write_title(validation, "Excel-style Validation", "Independent recomputation of key metrics")
-    validation_headers = ["Metric", "Excel-style Formula", "Recomputed", "App Value", "Difference", "Status"]
+    write_title(validation, "Validation", "Independent recomputation of key metrics")
+    validation_headers = ["Metric", "Formula", "Recomputed", "App Value", "Difference", "Status"]
     for col, h in enumerate(validation_headers, 1):
         cell = validation.cell(4, col, h)
         cell.font = Font(bold=True, color=colors["white"])
         cell.fill = fill(colors["teal"])
         cell.border = border
     for idx, row in enumerate(excel_validation_rows(r), 5):
-        values = [row["Metric"], row["Excel-style Formula"], row["Recomputed"], row["App Value"], row["Difference"], row["Status"]]
+        values = [row["Metric"], row["Formula"], row["Recomputed"], row["App Value"], row["Difference"], row["Status"]]
         for col, value in enumerate(values, 1):
             cell = validation.cell(idx, col, value)
             cell.border = border
@@ -1916,7 +1937,7 @@ def formula_audit_rows(frequency="Daily"):
     periods = 252 if frequency == "Daily" else 12
     return [
         {"Metric": "Periodic Return", "Formula": "Price[t] / Price[t-1] - 1", "Notes": "Used for both fund NAV and benchmark price after date alignment."},
-        {"Metric": "Annual Return", "Formula": f"AVERAGE(periodic returns) x {periods}", "Notes": "Matches your Excel CAPM sheet style. CAGR is also shown separately."},
+        {"Metric": "Annual Return", "Formula": f"AVERAGE(periodic returns) x {periods}", "Notes": "CAGR is also shown separately."},
         {"Metric": "CAGR", "Formula": "(Ending price / Starting price)^(1 / years) - 1", "Notes": "Useful investor return view, but not the primary CAPM input."},
         {"Metric": "Beta", "Formula": "COVARIANCE.S(fund returns, benchmark returns) / VAR.S(benchmark returns)", "Notes": "Equivalent to Excel SLOPE(fund returns, benchmark returns)."},
         {"Metric": "CAPM Expected", "Formula": "Risk-free rate + Beta x (Market annual return - Risk-free rate)", "Notes": "Uses annualized average market return."},
@@ -1950,13 +1971,13 @@ def render_download_report(r, key="report"):
 
 
 def page_analyze():
-    st.markdown("<div class='page-note'>Start here. Search a fund, choose a reliable benchmark, and run an Excel-style CAPM analysis. Asset allocation and AI have been removed deliberately.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-note'>Start here. Search a fund, choose a reliable benchmark, and run a CAPM analysis.</div>", unsafe_allow_html=True)
     fund, benchmark_choice, years, frequency, rf_annual, uploaded, run = render_analysis_inputs()
     if run:
         if not fund:
             st.warning("Please select a fund before running analysis.")
             return
-        with st.spinner("Running Excel-style CAPM calculation..."):
+        with st.spinner("Running CAPM calculation..."):
             result, err = run_capm_analysis(fund["code"], fund["name"], fund["category"], benchmark_choice, years, frequency, rf_annual, uploaded)
         if err:
             st.error(err)
@@ -1992,7 +2013,7 @@ def page_compare():
     with a:
         benchmark_choice = st.selectbox("Benchmark", list(BENCHMARKS.keys()), index=0, key="compare_bench")
     with b:
-        years = st.select_slider("Period", options=[1, 2, 3, 4, 5, 7, 10], value=4, key="compare_years")
+        years = st.select_slider("Period (in years)", options=[1, 2, 3, 4, 5, 7, 10], value=4, key="compare_years")
     with c:
         frequency = st.radio("Frequency", ["Daily", "Monthly"], horizontal=True, key="compare_freq")
     rf_annual = st.number_input("Risk-free rate (%)", min_value=0.0, max_value=15.0, value=6.5, step=0.1, key="compare_rf") / 100
@@ -2066,10 +2087,10 @@ def page_compare():
         fig.update_layout(
             title="Growth of INR 10,000 — All Funds",
             paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=420,
-            margin=dict(l=10, r=10, t=45, b=10),
+            margin=dict(l=10, r=10, t=45, b=48),
             xaxis=dict(gridcolor=GRID, color=MUTED),
             yaxis=dict(gridcolor=GRID, color=MUTED, tickprefix="INR "),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+            legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
             hovermode="x unified",
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -2473,10 +2494,10 @@ def page_forecast():
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         height=380,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(title="Years", gridcolor=GRID, color=MUTED),
         yaxis=dict(title="Projected value", gridcolor=GRID, color=MUTED, tickprefix="INR "),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -2498,7 +2519,7 @@ def page_report_builder():
   <div class="row"><span>Metrics Dashboard</span><span>Clean metric table, fund score, plus growth chart</span></div>
   <div class="row"><span>Assumptions</span><span>Data source, frequency, risk-free rate, exclusions</span></div>
   <div class="row"><span>Formula Audit</span><span>Formula-by-formula calculation explanation</span></div>
-  <div class="row"><span>Validation</span><span>Excel-style recomputation check</span></div>
+  <div class="row"><span>Validation</span><span>Independent recomputation check</span></div>
   <div class="row"><span>SIP Backtest</span><span>INR 10,000 monthly SIP backtest using actual NAVs</span></div>
   <div class="row"><span>Return Data</span><span>Aligned raw prices, returns, growth, drawdown</span></div>
 </div>
@@ -2884,10 +2905,10 @@ def chart_ff_cumulative(r):
     fig.update_layout(
         title="Actual vs Factor-Model Fitted Cumulative Excess Return",
         paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG, height=350,
-        margin=dict(l=10, r=10, t=45, b=10),
+        margin=dict(l=10, r=10, t=45, b=48),
         xaxis=dict(gridcolor=GRID, color=MUTED),
         yaxis=dict(title="Cumulative excess return (%)", gridcolor=GRID, color=MUTED),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -2898,7 +2919,7 @@ def render_fama_french_inputs():
     fund = search_fund_widget("ff", "Search fund")
     a, b, c = st.columns(3)
     with a:
-        years = st.select_slider("Period", options=[1, 2, 3, 4, 5, 7, 10], value=4, key="ff_years")
+        years = st.select_slider("Period (in years)", options=[1, 2, 3, 4, 5, 7, 10], value=4, key="ff_years")
     with b:
         frequency = st.radio("Return frequency", ["Daily", "Monthly"], horizontal=True, key="ff_freq")
     with c:
