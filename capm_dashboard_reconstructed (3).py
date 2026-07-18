@@ -15,6 +15,7 @@ import io
 import os
 import re
 import tempfile
+import urllib.request
 import warnings
 from datetime import datetime, timedelta
 
@@ -2543,6 +2544,28 @@ def page_formula_audit():
 # exposed as a text input on the page rather than hardcoded permanently.
 
 
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def fetch_latest_iima_release():
+    """Scrape the IIMA data-library index page for the newest available release tag
+    (e.g. '2026-04'), so the dashboard can always pull the current data without
+    someone having to hand-edit a hardcoded month. Returns None if detection fails,
+    in which case the caller falls back to IIMA_DEFAULT_RELEASE."""
+    index_url = "https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/"
+    try:
+        req = urllib.request.Request(index_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            page_html = resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+    matches = re.findall(
+        r"(\d{4}-\d{2})_FourFactors_and_Market_Returns_Monthly_SurvivorshipBiasAdjusted\.csv",
+        page_html,
+    )
+    if not matches:
+        return None
+    return sorted(set(matches))[-1]
+
+
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def fetch_iima_factor_data(frequency, release=IIMA_DEFAULT_RELEASE):
     filename = f"{release}_FourFactors_and_Market_Returns_{frequency}_SurvivorshipBiasAdjusted.csv"
@@ -2658,6 +2681,9 @@ def run_fama_french_analysis(scheme_code, fund_name, category, years, frequency,
     if factor_df is None or factor_df.empty:
         return None, "Fama-French factor data is unavailable. Check the release tag or upload a factor file."
 
+    factor_data_last_date = factor_df.index.max()
+    fund_nav_last_date = fund_all.index.max()
+
     if frequency == "Monthly":
         fund_prices = fund_prices.resample("ME").last().dropna()
     fund_ret = fund_prices.pct_change().dropna()
@@ -2706,6 +2732,9 @@ def run_fama_french_analysis(scheme_code, fund_name, category, years, frequency,
         "n_obs": len(merged),
         "start_date": merged.index[0],
         "end_date": merged.index[-1],
+        "factor_data_last_date": factor_data_last_date,
+        "factor_data_lag_days": (as_of - factor_data_last_date).days,
+        "fund_nav_last_date": fund_nav_last_date,
         "fund_return_ann": fund_return_ann,
         "rf_annual_avg": rf_annual_avg,
         "alpha_period": alpha_period,
@@ -2857,11 +2886,18 @@ def render_fama_french_inputs():
         include_momentum = st.checkbox("Include Momentum (WML) factor", value=True, key="ff_momentum")
     d, e = st.columns(2)
     with d:
-        release = st.text_input(
-            "IIM Ahmedabad data release", value=IIMA_DEFAULT_RELEASE, key="ff_release",
-            help="Release tag used in the IIMA data library filenames, e.g. 2025-12. "
-                 "Update this when a newer release is published.",
+        release_mode = st.radio(
+            "IIM Ahmedabad data release",
+            ["Auto-detect latest (recommended)", "Manual release tag"],
+            key="ff_release_mode",
+            help="Auto-detect always pulls whatever release is currently live on the IIMA site, "
+                 "so you don't have to track their update schedule yourself.",
         )
+        manual_release = IIMA_DEFAULT_RELEASE
+        if release_mode == "Manual release tag":
+            manual_release = st.text_input(
+                "Release tag (e.g. 2025-12)", value=IIMA_DEFAULT_RELEASE, key="ff_release",
+            )
     with e:
         rf_choice = st.radio(
             "Risk-free rate source", ["IIM Ahmedabad RF (recommended)", "Custom annual rate"],
@@ -2875,16 +2911,26 @@ def render_fama_french_inputs():
         type=["csv", "xlsx", "xls"], key="ff_factor_upload",
     )
     run = st.button("Run Fama-French Analysis", use_container_width=True, key="ff_run")
-    return fund, years, frequency, include_momentum, release, rf_choice, custom_rf, uploaded_factor, run
+    return fund, years, frequency, include_momentum, release_mode, manual_release, rf_choice, custom_rf, uploaded_factor, run
 
 
 def render_fama_french_summary(r):
+    lag_days = r["factor_data_lag_days"]
+    if lag_days <= 45:
+        lag_class, lag_msg = "good", "fresh, within IIMA's normal update cycle"
+    elif lag_days <= 150:
+        lag_class, lag_msg = "warn", "normal lag — IIMA hasn't published a newer release yet"
+    else:
+        lag_class, lag_msg = "bad", "longer than usual — worth checking IIMA's site for a newer release"
     st.markdown(
         f"""
 <div class="page-note">
   <b>{esc(r['fund_name'])}</b> | Code {esc(r['scheme_code'])} | {category_label(r['category'])} |
   Factor data: IIM Ahmedabad ({esc(r['factor_source'])}) |
   {r['n_obs']} matched {r['frequency'].lower()} observations from {r['start_date'].strftime('%d %b %Y')} to {r['end_date'].strftime('%d %b %Y')}.
+  <br/>Factor data current through <b>{r['factor_data_last_date'].strftime('%d %b %Y')}</b>
+  (<span class="{lag_class}">{lag_days} days behind today — {lag_msg}</span>).
+  Fund NAV current through {r['fund_nav_last_date'].strftime('%d %b %Y')}.
 </div>
 """,
         unsafe_allow_html=True,
@@ -2992,7 +3038,7 @@ def page_fama_french():
         "Value (HML) and Momentum (WML) — a stricter skill test than the single-factor CAPM alpha.</div>",
         unsafe_allow_html=True,
     )
-    fund, years, frequency, include_momentum, release, rf_choice, custom_rf, uploaded_factor, run = render_fama_french_inputs()
+    fund, years, frequency, include_momentum, release_mode, manual_release, rf_choice, custom_rf, uploaded_factor, run = render_fama_french_inputs()
     rf_mode = "iima" if rf_choice.startswith("IIM Ahmedabad") else "custom"
 
     if run:
@@ -3003,13 +3049,28 @@ def page_fama_french():
         if not uploaded_df.empty:
             factor_df, factor_source = uploaded_df, uploaded_label
         else:
+            if release_mode == "Manual release tag":
+                release = manual_release.strip() or IIMA_DEFAULT_RELEASE
+            else:
+                with st.spinner("Detecting the latest IIM Ahmedabad release..."):
+                    detected = fetch_latest_iima_release()
+                if detected:
+                    release = detected
+                    st.caption(f"Using the latest available IIM Ahmedabad release: {release}.")
+                else:
+                    release = IIMA_DEFAULT_RELEASE
+                    st.warning(
+                        f"Could not auto-detect the latest release right now (site unreachable or layout "
+                        f"changed) — falling back to {IIMA_DEFAULT_RELEASE}. Switch to 'Manual release tag' "
+                        "to enter a specific one, or upload your own factor file."
+                    )
             with st.spinner("Fetching IIM Ahmedabad factor data..."):
-                factor_df, factor_url, factor_err = fetch_iima_factor_data(frequency, release.strip() or IIMA_DEFAULT_RELEASE)
+                factor_df, factor_url, factor_err = fetch_iima_factor_data(frequency, release)
             if factor_err or factor_df.empty:
                 st.error(
-                    f"Could not fetch factor data for release '{release}'. Try a different release tag "
-                    "(check https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/ for the latest one) "
-                    "or upload a factor file."
+                    f"Could not fetch factor data for release '{release}'. Try 'Manual release tag' with a "
+                    "different tag (check https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/ for the "
+                    "latest one) or upload a factor file."
                 )
                 return
             factor_source = f"Release {release}"
@@ -3034,6 +3095,8 @@ def page_fama_french():
         "<div class='panel'><div class='card-title'>Fama-French and Momentum Factors: Data Library for Indian Market</div>"
         + row_html("Maintained by", "Indian Institute of Management, Ahmedabad (Profs. Sobhesh K. Agarwalla, Joshy Jacob, Jayanth R. Varma)")
         + row_html("Underlying data", "CMIE Prowess DX, BSE and NSE listed companies, survivorship-bias adjusted")
+        + row_html("Update frequency", "IIMA typically publishes 3 releases a year — this is a property of the source, not this dashboard")
+        + row_html("This run used", r["factor_source"] + ", covering through " + r["factor_data_last_date"].strftime("%d %b %Y"))
         + row_html("Citation", IIMA_CITATION)
         + row_html("Source", "https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/")
         + "</div>",
