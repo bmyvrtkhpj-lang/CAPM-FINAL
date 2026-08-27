@@ -307,21 +307,35 @@ def periods_per_year(frequency):
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def load_schemes():
     try:
-        # Attempt 1: Try fetching live data from AMFI
-        mf = Mftool()
-        data = mf.get_scheme_codes()
-        df = pd.DataFrame(list(data.items()), columns=["code", "name"])
+        # Load the locally generated CSV file
+        df = pd.read_csv("amfi_live_schemes.csv")
+        
+        # Ensure all columns exist and fill empty values
+        for col in ["name", "Plan", "Option"]:
+            if col not in df.columns:
+                df[col] = ""
+            df[col] = df[col].fillna("").astype(str).str.strip()
+            
+        # Merge Name, Plan, and Option so the search filter can find "Direct" and "Growth"
+        df["full_name"] = df["name"] + " - " + df["Plan"] + " - " + df["Option"]
+        
+        # Clean up the format
+        df["full_name"] = df["full_name"].str.replace(" - - ", " - ")
+        df["full_name"] = df["full_name"].str.strip(" - ")
+        
+        # Keep only the required columns and set them for the app
+        df = df[["code", "full_name"]].rename(columns={"full_name": "name"})
+        df["code"] = df["code"].astype(str).str.strip()
+        df["name_lower"] = df["name"].str.lower()
+        
+        return df.sort_values("name")
+
+    except FileNotFoundError:
+        st.error("⚠️ 'amfi_live_schemes.csv' missing. Please run the fetch script first.")
+        return pd.DataFrame(columns=["code", "name", "name_lower"])
     except Exception as e:
-        # Attempt 2: Fallback to offline CSV if AMFI is down
-        st.warning("⚠️ AMFI server is down. Loading offline scheme list.")
-        try:
-            df = pd.read_csv("fallback_amfi_schemes.csv")
-            # Ensure column names match what the app expects
-            if "Scheme_Code" in df.columns:
-                df = df.rename(columns={"Scheme_Code": "code", "Scheme_Name": "name"})
-        except FileNotFoundError:
-            st.error("Critical Error: AMFI is down and 'fallback_amfi_schemes.csv' is missing from your repository.")
-            return pd.DataFrame(columns=["code", "name", "name_lower"])
+        st.error(f"⚠️ Error loading offline schemes: {e}")
+        return pd.DataFrame(columns=["code", "name", "name_lower"])
 
     # Standardize and clean the data
     df["code"] = df["code"].astype(str)
