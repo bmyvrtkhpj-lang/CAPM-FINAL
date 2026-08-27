@@ -14,6 +14,7 @@ import html
 import io
 import os
 import re
+import ssl
 import tempfile
 import urllib.request
 import warnings
@@ -304,44 +305,62 @@ def periods_per_year(frequency):
     return (252, "B") if frequency == "Daily" else (12, "ME")
 
 
+import ssl
+
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def load_schemes():
     try:
-        # Load the locally generated CSV file
-        df = pd.read_csv("amfi_live_schemes.csv")
+        # ATTEMPT 1: Direct live fetch from AMFI server (Provides FULL names for filtering)
+        url = "https://www.amfiindia.com/spages/NAVAll.txt"
         
-        # Ensure all columns exist and fill empty values
-        for col in ["name", "Plan", "Option"]:
+        # Disguise as a browser to prevent AMFI from blocking the request
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+        
+        # Bypass Mac/Linux SSL certificate verification issues
+        context = ssl._create_unverified_context()
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=15, context=context) as response:
+            raw_data = response.read().decode('utf-8')
+            
+        df = pd.read_csv(io.StringIO(raw_data), sep=";", on_bad_lines="skip", dtype=str)
+        df = df.rename(columns={"Scheme Code": "code", "Scheme Name": "name"})
+        df = df.dropna(subset=["code", "name"])
+        
+        # Merge columns to create the full name (e.g., "Parag Parikh Flexi Cap - Direct - Growth")
+        for col in ["Plan", "Option"]:
             if col not in df.columns:
                 df[col] = ""
             df[col] = df[col].fillna("").astype(str).str.strip()
             
-        # Merge Name, Plan, and Option so the search filter can find "Direct" and "Growth"
         df["full_name"] = df["name"] + " - " + df["Plan"] + " - " + df["Option"]
-        
-        # Clean up the format
-        df["full_name"] = df["full_name"].str.replace(" - - ", " - ")
-        df["full_name"] = df["full_name"].str.strip(" - ")
-        
-        # Keep only the required columns and set them for the app
+        df["full_name"] = df["full_name"].str.replace(" - - ", " - ").str.strip(" - ")
         df = df[["code", "full_name"]].rename(columns={"full_name": "name"})
-        df["code"] = df["code"].astype(str).str.strip()
-        df["name_lower"] = df["name"].str.lower()
-        
-        return df.sort_values("name")
 
-    except FileNotFoundError:
-        st.error("⚠️ 'amfi_live_schemes.csv' missing. Please run the fetch script first.")
-        return pd.DataFrame(columns=["code", "name", "name_lower"])
     except Exception as e:
-        st.error(f"⚠️ Error loading offline schemes: {e}")
-        return pd.DataFrame(columns=["code", "name", "name_lower"])
+        # ATTEMPT 2: Fallback to mftool if direct server fetch fails
+        st.warning(f"⚠️ Live AMFI text fetch failed. Falling back to mftool. Filter might be limited.")
+        try:
+            mf = Mftool()
+            data = mf.get_scheme_codes()
+            df = pd.DataFrame(list(data.items()), columns=["code", "name"])
+        except Exception as e2:
+            st.error("⚠️ All servers down. Please check your internet connection.")
+            return pd.DataFrame(columns=["code", "name", "name_lower"])
 
-    # Standardize and clean the data
-    df["code"] = df["code"].astype(str)
-    df = df[df["code"].str.fullmatch(r"\d+")]
+    # Final Formatting & Cleaning
+    df["code"] = df["code"].astype(str).str.strip()
+    # Safely extract only numbers to prevent bad data
+    df["code"] = df["code"].str.extract(r'(\d+)')[0] 
+    df = df.dropna(subset=["code"])
+    
     df["name"] = df["name"].astype(str).str.strip()
     df["name_lower"] = df["name"].str.lower()
+    df = df.drop_duplicates(subset=["code"])
+    
     return df.sort_values("name")
 
 @st.cache_data(show_spinner=False, ttl=6 * 3600)
