@@ -89,6 +89,16 @@ body {
   font-size: 12px;
 }
 
+.heatmap-cell {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.heatmap-cell:hover {
+  transform: scale(1.15);
+  z-index: 10;
+  position: relative;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+}
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
